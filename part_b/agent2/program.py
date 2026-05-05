@@ -70,7 +70,8 @@ class Agent:
             case CascadeAction(coord, direction):
             case _:
                 raise ValueError(f"Unknown action type: {action}")
-        '''        
+        '''
+
     def _legal_placements(self) -> list[PlaceAction]:
         """
         Returns a list of all legal placement actions for the current board state.
