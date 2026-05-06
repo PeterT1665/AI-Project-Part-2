@@ -2,7 +2,6 @@
 # Project Part B: Game Playing Agent
 
 import random
-import math as Math
 from referee.game import PlayerColor, Coord, Direction, \
     Action, PlaceAction, MoveAction, EatAction, CascadeAction
 from referee.game.board import Board, GamePhase
@@ -23,43 +22,13 @@ class Agent:
 
     def action(self, **referee: dict) -> Action:
         
-        value: dict[Action,float] = {}
 
         if self._board.phase == GamePhase.PLACEMENT:
-            return random.choice(self._legal_placements())
+            actions = self._legal_placements()
+        else:
+            actions = self._legal_play_actions()
 
-        for action in self._legal_play_actions(self._color):
-            self._board.apply_action(action)
-            value[action] = self._minimax()
-            self._board.undo_action()
-        return max(value.items(), key=lambda x:x[1])[0]
-
-    def _minimax(self) -> float:
-
-        if(self._board.game_over):
-            if(self._color == self._board.winner_color):
-                return 1
-            elif(self._board.winner_color is None):
-                return 0
-            else:
-                return -1
-        elif(self._board.turn_color == self._color):
-            highest = -Math.inf
-            for action in self._legal_play_actions(self._color):
-                self._board.apply_action(action)
-                value = self._minimax()
-                self._board.undo_action()
-                highest = max(value,highest)
-            return highest
-        elif(self._board.turn_color == self._color.opponent):
-            lowest = Math.inf
-            for action in self._legal_play_actions(self._color.opponent):
-                self._board.apply_action(action)
-                value = self._minimax()
-                self._board.undo_action()
-                lowest = min(value,lowest)
-            return lowest
-
+        return random.choice(actions)
 
 
     def update(self, color: PlayerColor, action: Action, **referee: dict):
@@ -68,6 +37,7 @@ class Agent:
         turn. You should use it to update the agent's internal game state.
         """
         self._board.apply_action(action)
+
 
 
         '''
@@ -114,11 +84,12 @@ class Agent:
         return False
     
 
-    def _legal_play_actions(self, color : PlayerColor) -> list[Action]:
+    def _legal_play_actions(self) -> list[Action]:
         """
         Returns a list of all legal play actions (MOVE, EAT, CASCADE) for the current board state.
         """
         state = self._board._state
+        color = self._color
         opp = color.opponent
 
         eat_actions = []
