@@ -9,6 +9,9 @@ from referee.game.board import Board, GamePhase
 from referee.game.coord import CARDINAL_DIRECTIONS
 from referee.game.constants import BOARD_N
 
+DEPTH_LIM = 2
+
+
 class Agent:
     
 
@@ -30,24 +33,20 @@ class Agent:
 
         for action in self._legal_play_actions(self._color):
             self._board.apply_action(action)
-            value[action] = self._minimax()
+            value[action] = self._minimax(0)
             self._board.undo_action()
         return max(value.items(), key=lambda x:x[1])[0]
 
-    def _minimax(self) -> float:
+    def _minimax(self,depth: int) -> float:
 
-        if(self._board.game_over):
-            if(self._color == self._board.winner_color):
-                return 1
-            elif(self._board.winner_color is None):
-                return 0
-            else:
-                return -1
+        if(depth == DEPTH_LIM):
+            return self._evaluation()                                  
+
         elif(self._board.turn_color == self._color):
             highest = -Math.inf
             for action in self._legal_play_actions(self._color):
                 self._board.apply_action(action)
-                value = self._minimax()
+                value = self._minimax(depth+1)
                 self._board.undo_action()
                 highest = max(value,highest)
             return highest
@@ -55,12 +54,16 @@ class Agent:
             lowest = Math.inf
             for action in self._legal_play_actions(self._color.opponent):
                 self._board.apply_action(action)
-                value = self._minimax()
+                value = self._minimax(depth+1)
                 self._board.undo_action()
                 lowest = min(value,lowest)
             return lowest
 
-
+    def _evaluation(self) -> float:
+        if(self._color == PlayerColor.RED):
+            return self._board.red_tokens - self._board.blue_tokens
+        else:
+            return -(self._board.red_tokens - self._board.blue_tokens)
 
     def update(self, color: PlayerColor, action: Action, **referee: dict):
         """
