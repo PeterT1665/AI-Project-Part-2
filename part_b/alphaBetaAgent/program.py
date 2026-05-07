@@ -9,7 +9,7 @@ from referee.game.board import Board, GamePhase
 from referee.game.coord import CARDINAL_DIRECTIONS
 from referee.game.constants import BOARD_N
 
-DEPTH_LIM = 2
+DEPTH_LIM = 3   # odd means we calculate the eval at this agents turn
 
 
 class Agent:
@@ -31,13 +31,19 @@ class Agent:
         if self._board.phase == GamePhase.PLACEMENT:
             return random.choice(self._legal_placements())
 
+        alpha = -Math.inf
+        bestMove = None
         for action in self._legal_play_actions(self._color):
             self._board.apply_action(action)
-            value[action] = self._minimax(0)
+            eval = self._minimax(0,alpha,Math.inf)
+            
+            if(eval> alpha):
+                bestMove = action 
+                alpha = eval
             self._board.undo_action()
-        return max(value.items(), key=lambda x:x[1])[0]
+        return bestMove
 
-    def _minimax(self,depth: int) -> float:
+    def _minimax(self,depth: int, alpha: float, beta: float) -> float:
 
         if(depth == DEPTH_LIM):
             return self._evaluation()                                  
@@ -46,17 +52,23 @@ class Agent:
             highest = -Math.inf
             for action in self._legal_play_actions(self._color):
                 self._board.apply_action(action)
-                value = self._minimax(depth+1)
+                value = self._minimax(depth+1,alpha,beta)
                 self._board.undo_action()
                 highest = max(value,highest)
+                alpha = max(value,alpha)
+                if(beta <= alpha):
+                    break
             return highest
         elif(self._board.turn_color == self._color.opponent):
             lowest = Math.inf
             for action in self._legal_play_actions(self._color.opponent):
                 self._board.apply_action(action)
-                value = self._minimax(depth+1)
+                value = self._minimax(depth+1,alpha,beta)
                 self._board.undo_action()
                 lowest = min(value,lowest)
+                beta = min(value,beta)
+                if(beta <= alpha):
+                    break
             return lowest
 
     def _evaluation(self) -> float:
@@ -64,6 +76,13 @@ class Agent:
             return self._board.red_tokens - self._board.blue_tokens
         else:
             return -(self._board.red_tokens - self._board.blue_tokens)
+        
+    def _evaluation1(self) -> float:
+        if(self._color == PlayerColor.RED):
+            return self._board.red_tokens - self._board.blue_tokens
+        else:
+            return -(self._board.red_tokens - self._board.blue_tokens)
+
 
     def update(self, color: PlayerColor, action: Action, **referee: dict):
         """
