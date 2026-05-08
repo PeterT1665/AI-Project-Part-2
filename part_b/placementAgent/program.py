@@ -29,7 +29,17 @@ class Agent:
         value: dict[Action,float] = {}
 
         if self._board.phase == GamePhase.PLACEMENT:
-            return random.choice(self._legal_placements())
+            maxEval = -Math.inf
+            bestPlace = None
+            for action in self._legal_placements():
+                eval = self.placement_evaluation(action.coord)
+                if (eval > maxEval):
+                    maxEval = eval
+                    bestPlace = action
+            
+            return bestPlace
+
+
 
         alpha = -Math.inf
         bestMove = None
