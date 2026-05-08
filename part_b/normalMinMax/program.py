@@ -10,6 +10,7 @@ from referee.game.coord import CARDINAL_DIRECTIONS
 from referee.game.constants import BOARD_N
 
 DEPTH_LIM = 1   # odd means we calculate the eval at this agents turn
+counter = 0     # counter to count number of recursions nodes expanded
 
 
 class Agent:
@@ -24,6 +25,7 @@ class Agent:
             case PlayerColor.RED:
             case PlayerColor.BLUE:
 
+
     def action(self, **referee: dict) -> Action:
         
         value: dict[Action,float] = {}
@@ -35,10 +37,13 @@ class Agent:
             self._board.apply_action(action)
             value[action] = self._minimax(0)
             self._board.undo_action()
+        print(counter)
         return max(value.items(), key=lambda x:x[1])[0]
 
     def _minimax(self,depth: int) -> float:
 
+        global counter
+        counter+=1
         if(depth == DEPTH_LIM):
             return self._evaluation()                                  
 

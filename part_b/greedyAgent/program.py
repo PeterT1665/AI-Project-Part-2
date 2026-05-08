@@ -9,8 +9,6 @@ from referee.game.board import Board, GamePhase
 from referee.game.coord import CARDINAL_DIRECTIONS
 from referee.game.constants import BOARD_N
 
-DEPTH_LIM = 3   # odd means we calculate the eval at this agents turn
-
 
 class Agent:
     
@@ -19,57 +17,27 @@ class Agent:
         
         self._color = color
         self._board = Board()
-    
+
         match color:
             case PlayerColor.RED:
             case PlayerColor.BLUE:
 
     def action(self, **referee: dict) -> Action:
         
-        value: dict[Action,float] = {}
 
         if self._board.phase == GamePhase.PLACEMENT:
             return random.choice(self._legal_placements())
 
-        alpha = -Math.inf
+        value = -Math.inf
         bestMove = None
         for action in self._legal_play_actions(self._color):
             self._board.apply_action(action)
-            eval = self._minimax(0,alpha,Math.inf)
-            
-            if(eval> alpha):
-                bestMove = action 
-                alpha = eval
+            eval = self._evaluation()
+            if(eval > value):
+                value = eval
+                bestMove = action
             self._board.undo_action()
         return bestMove
-
-    def _minimax(self,depth: int, alpha: float, beta: float) -> float:
-
-        if(depth == DEPTH_LIM):
-            return self._evaluation()                                  
-
-        elif(self._board.turn_color == self._color):
-            highest = -Math.inf
-            for action in self._legal_play_actions(self._color):
-                self._board.apply_action(action)
-                value = self._minimax(depth+1,alpha,beta)
-                self._board.undo_action()
-                highest = max(value,highest)
-                alpha = max(value,alpha)
-                if(beta <= alpha):
-                    break
-            return highest
-        elif(self._board.turn_color == self._color.opponent):
-            lowest = Math.inf
-            for action in self._legal_play_actions(self._color.opponent):
-                self._board.apply_action(action)
-                value = self._minimax(depth+1,alpha,beta)
-                self._board.undo_action()
-                lowest = min(value,lowest)
-                beta = min(value,beta)
-                if(beta <= alpha):
-                    break
-            return lowest
 
     def _evaluation(self) -> float:
         if(self._color == PlayerColor.RED):
