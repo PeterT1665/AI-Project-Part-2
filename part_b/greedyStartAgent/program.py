@@ -39,8 +39,10 @@ class Agent:
             
             return bestPlace
 
-
-
+        merge = self._find_merge_action()
+        if merge is not None:
+            return merge
+        
         alpha = -Math.inf
         bestMove = None
         for action in self._legal_play_actions(self._color):
@@ -52,6 +54,20 @@ class Agent:
                 alpha = eval
             self._board.undo_action()
         return bestMove
+    
+    def _find_merge_action(self):
+        state = self._board._state
+        color = self._color
+        for team_coord, cell in state.items():
+            if cell.color == color:
+                for d in CARDINAL_DIRECTIONS:
+                    try:
+                        des = team_coord + d
+                        if self._board[des].color == color:
+                            return MoveAction(team_coord, d)
+                    except ValueError:
+                        pass
+        return None
 
     def _minimax(self,depth: int, alpha: float, beta: float) -> float:
 
