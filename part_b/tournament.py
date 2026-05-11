@@ -6,12 +6,13 @@ from subprocess import PIPE,run
 
 """
 
-cmdLine=["python3","-m", "referee", "greedyAgent","randomAgent"]
+matches = 1000
+cmdLine=["python3","-m", "referee", "greedyAgent2","greedyAgent3"]
 countRed = 0
 countBlue = 0
-for i in range(30):
+for i in range(matches):
     gameOutput = run(cmdLine,capture_output=True,text=True)
     countRed += gameOutput.stdout.count('winner is RED')
     countBlue += gameOutput.stdout.count('winner is BLUE')
 
-print(countRed,countBlue,30-(countRed+countBlue))
+print("GreedyAgent2 vs GreedyAgent3",countRed,countBlue,matches-(countRed+countBlue))

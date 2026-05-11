@@ -28,6 +28,12 @@ class Agent:
         if self._board.phase == GamePhase.PLACEMENT:
             return random.choice(self._legal_placements())
 
+        # """""REMOVE LATER THIS IS FOR RANDOM INJECTION TO AVOID TIES"""
+        # EPSILON = 0.1  # 10% chance of random move
+
+        # if random.random() < EPSILON:
+        #     return random.choice(self._legal_play_actions(self._color))
+
 
         value = -Math.inf
         bestMove = None
@@ -41,11 +47,51 @@ class Agent:
         return bestMove
 
     def _evaluation(self) -> float:
+
+        if(self._board.game_over):
+            if(self._board.winner_color == self._color): return Math.inf
+            elif(self._board.winner_color == self._color.opponent): return -Math.inf
+            else: return 0
+
+        # If we have more towers we are doing better
+        eval = 0
         if(self._color == PlayerColor.RED):
-            return self._board.red_tokens - self._board.blue_tokens
+            eval +=  10*(self._board.red_tokens - self._board.blue_tokens)
         else:
-            return -(self._board.red_tokens - self._board.blue_tokens)
+            eval += -10*(self._board.red_tokens - self._board.blue_tokens)
+
+        eval += self._attacking_power()
+
+        # mobility
+        eval += 0.2*(len(self._legal_play_actions(self._color)) - len(self._legal_play_actions(self._color.opponent)))
+
+
+
+        return eval
+    
+    def _attacking_power(self):
         
+        ourTowers = [value.height for key,value in self._board._state.items() if value.color == self._color ]
+        enemyTowers = [value.height for key,value in self._board._state.items() if value.color == self._color.opponent]
+        
+        ourAttackingPower = 0
+        for i in ourTowers:
+            for j in enemyTowers:
+                if i>=j:
+                    ourAttackingPower+=1
+
+        enemyAttackingPower = 0
+        for i in enemyTowers:
+            for j in ourTowers:
+                if i>=j:
+                    enemyAttackingPower+=1
+        
+        return ourAttackingPower-enemyAttackingPower
+        
+        
+
+            
+
 
     def update(self, color: PlayerColor, action: Action, **referee: dict):
         """
