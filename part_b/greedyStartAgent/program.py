@@ -39,9 +39,14 @@ class Agent:
             
             return bestPlace
 
-        merge = self._find_merge_action()
-        if merge is not None:
-            return merge
+        has_merged = 0
+        for cell in self._board._state.values():
+            if cell.color == self._color and cell.height >= 6:
+                has_merged = 1
+        if not has_merged:
+            merge = self._find_merge_action()
+            if merge is not None:
+                return merge
         
         alpha = -Math.inf
         bestMove = None
