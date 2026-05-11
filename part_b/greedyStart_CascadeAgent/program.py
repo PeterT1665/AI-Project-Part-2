@@ -39,7 +39,6 @@ class Agent:
             
             return bestPlace
 
-        '''
         has_merged = 0
         for cell in self._board._state.values():
             if cell.color == self._color and cell.height >= 6:
@@ -48,7 +47,7 @@ class Agent:
             merge = self._find_merge_action()
             if merge is not None:
                 return merge
-        '''
+        
         alpha = -Math.inf
         bestMove = None
         for action in self._legal_play_actions(self._color):
@@ -78,7 +77,7 @@ class Agent:
     def _minimax(self,depth: int, alpha: float, beta: float) -> float:
 
         if(depth == DEPTH_LIM):
-            return self._evaluation_cascade()                                  
+            return self._evaluation()                                  
 
         elif(self._board.turn_color == self._color):
             highest = -Math.inf
@@ -110,42 +109,11 @@ class Agent:
             return -(self._board.red_tokens - self._board.blue_tokens)
         
     def _evaluation_cascade(self) -> float:
-        my_towers = {}
-        opp_towers = {}
-        for coord, cell in self._board._state.items():
-            if cell.color == self._color:
-                my_towers[coord] = cell
-            else:
-                opp_towers[coord] = cell
-        if not my_towers:
-            return -Math.inf
-        if not opp_towers:
-            return Math.inf
         
-        my_attack_score = self._attack_evaluation(my_towers, opp_towers)
-        opp_attack_score = self._attack_evaluation(opp_towers, my_towers)
-
-        return opp_attack_score - my_attack_score
-        
-    def _attack_evaluation(self, attackers, targets):
-        attackers = dict(attackers)
-        total_cost = 0
-        for target_coord, target_cell in targets.items():
-            min_dist = Math.inf
-            closest_coord = None
-            if not attackers:
-                break
-            for attacker_coord in attackers:
-                dist = self.manhattan(target_coord, attacker_coord)
-                if dist < min_dist:
-                    min_dist = dist
-                    closest_coord = attacker_coord
-            
-            height = attackers[closest_coord].height
-            cost = -(-min_dist // height)   # Ceiling division
-            total_cost += cost
-            attackers[target_coord] = attackers.pop(closest_coord)
-        return total_cost
+        if(self._color == PlayerColor.RED):
+            return self._board.red_tokens - self._board.blue_tokens
+        else:
+            return -(self._board.red_tokens - self._board.blue_tokens)
 
 
     def update(self, color: PlayerColor, action: Action, **referee: dict):
