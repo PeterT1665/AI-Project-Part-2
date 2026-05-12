@@ -1,4 +1,4 @@
-from subprocess import PIPE,run
+from subprocess import run
 
 """
     Python program that conducts a tournament between a number of agents against each other for a
@@ -6,13 +6,16 @@ from subprocess import PIPE,run
 
 """
 
-matches = 1000
-cmdLine=["python3","-m", "referee", "greedyAgent2","greedyAgent3"]
+matches = 20
+RED_AGENT = "v5_cascade_eval"
+BLUE_AGENT = "v5b_cascade_eval"
+cmdLine=["/opt/anaconda3/bin/python","-m", "referee", RED_AGENT, BLUE_AGENT]
 countRed = 0
 countBlue = 0
 for i in range(matches):
     gameOutput = run(cmdLine,capture_output=True,text=True)
     countRed += gameOutput.stdout.count('winner is RED')
     countBlue += gameOutput.stdout.count('winner is BLUE')
+    print(f"Game {i+1}: RED={countRed} BLUE={countBlue}", flush=True)
 
-print("GreedyAgent2 vs GreedyAgent3",countRed,countBlue,matches-(countRed+countBlue))
+print(f"\n{RED_AGENT} vs {BLUE_AGENT}: RED={countRed} BLUE={countBlue} DRAW={matches-(countRed+countBlue)}")
