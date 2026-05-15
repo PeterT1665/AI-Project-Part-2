@@ -126,13 +126,13 @@ class Agent:
     def _proximity(self, ourTowers, enemyTowers):
         bonus = 0
         for oppCoord, oppVal in enemyTowers:
-            killable_dists = [
-                self.manhattan_distance(myCoord, oppCoord)
+            killable_costs = [
+                -(-self.manhattan_distance(myCoord, oppCoord) // myVal.height)
                 for myCoord, myVal in ourTowers
                 if myVal.height >= oppVal.height
             ]
-            if killable_dists:
-                bonus -= min(killable_dists) 
+            if killable_costs:
+                bonus -= min(killable_costs)
         return bonus
         
 

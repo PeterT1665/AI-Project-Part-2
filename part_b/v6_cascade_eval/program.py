@@ -99,6 +99,11 @@ class Agent:
             return -(self._board.red_tokens - self._board.blue_tokens)
         
     def _evaluation_cascade(self) -> float:
+        if self._board.game_over:
+            if self._board.winner_color == self._color: return Math.inf
+            if self._board.winner_color == self._color.opponent: return -Math.inf
+            return 0
+
         my_towers = {}
         opp_towers = {}
         for coord, cell in self._board._state.items():
@@ -125,7 +130,7 @@ class Agent:
         my_attack_score = self._attack_evaluation(my_towers, opp_towers)
         opp_attack_score = self._attack_evaluation(opp_towers, my_towers)
 
-        return opp_attack_score - my_attack_score + my_token - opp_token
+        return opp_attack_score - my_attack_score + my_token - opp_token + random.uniform(-0.1, 0.1)
         
     def _attack_evaluation(self, attackers, targets):
         attackers = dict(attackers)
