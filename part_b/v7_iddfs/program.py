@@ -307,16 +307,78 @@ class Agent:
         my_h  = sum(v.height for v in my_towers.values())
         opp_h = sum(v.height for v in opp_towers.values())
 
-        my_attack  = self._attack_cost(my_towers,  opp_towers)
-        opp_attack = self._attack_cost(opp_towers, my_towers)
+        # Token count — endgame win condition, highest weight
+        token_diff = (my_h - opp_h) * 2.0
 
-        my_ap  = sum(1 for av in my_towers.values()
-                       for tv in opp_towers.values() if av.height >= tv.height)
-        opp_ap = sum(1 for tv in opp_towers.values()
-                       for av in my_towers.values() if tv.height >= av.height)
-        attack_power = my_ap - opp_ap
+        # Threat quality: for each enemy find our best eligible attacker scored as
+        # height/(dist+1) — tall towers close to weak enemies score highest.
+        # This gives a smooth gradient for distance AND height in one term,
+        # so a merge that creates R6 close to an enemy beats scattered H1 debris.
+        my_threat = sum(
+            max((min(mv.height, tv.height) / (_mhdist(mc, tc) + 1)
+                 for mc, mv in my_towers.items() if mv.height >= tv.height),
+                default=0.0)
+            for tc, tv in opp_towers.items()
+        )
+        opp_threat = sum(
+            max((min(tv.height, mv.height) / (_mhdist(mc, tc) + 1)
+                 for tc, tv in opp_towers.items() if tv.height >= mv.height),
+                default=0.0)
+            for mc, mv in my_towers.items()
+        )
 
-        return (opp_attack - my_attack) + (my_h - opp_h) + attack_power + random.uniform(-0.1, 0.1)
+        # Multi-attack: count distinct my towers (h>=3) that are the highest-quality
+        # threat to DIFFERENT enemies — two towers each owning a separate enemy > one tower
+        assigned = {}
+        for tc, tv in opp_towers.items():
+            best_q, best_mc = 0.0, None
+            for mc, mv in my_towers.items():
+                if mv.height >= tv.height and mv.height >= 3:
+                    q = mv.height / (_mhdist(mc, tc) + 1)
+                    if q > best_q:
+                        best_q, best_mc = q, mc
+            if best_mc is not None:
+                assigned[tc] = best_mc
+        multi_attack = len(set(assigned.values())) * 2.0
+
+        # Directional cascade pressure: aligned + pushing enemy toward nearest edge
+        cascade_pressure = 0.0
+        for tc, tv in opp_towers.items():
+            for mc, mv in my_towers.items():
+                if mv.height < tv.height:
+                    continue
+                if mc.r == tc.r and mc.c != tc.c:
+                    edge_exp = (7 - tc.c) if mc.c < tc.c else tc.c
+                    cascade_pressure += 1.0 / ((abs(mc.c - tc.c) + 1) * (edge_exp + 1))
+                elif mc.c == tc.c and mc.r != tc.r:
+                    edge_exp = (7 - tc.r) if mc.r < tc.r else tc.r
+                    cascade_pressure += 1.0 / ((abs(mc.r - tc.r) + 1) * (edge_exp + 1))
+
+        # Mobility balance: (my escape routes - opp escape routes)
+        my_mob = opp_mob = 0
+        for mc, mv in my_towers.items():
+            for d in CARDINAL_DIRECTIONS:
+                try:
+                    nc = self._board[mc + d]
+                    if nc.is_empty or nc.color == color or (nc.color == opp and mv.height >= nc.height):
+                        my_mob += 1
+                except ValueError:
+                    pass
+        for tc, tv in opp_towers.items():
+            for d in CARDINAL_DIRECTIONS:
+                try:
+                    nc = self._board[tc + d]
+                    if nc.is_empty or nc.color == opp or (nc.color == color and tv.height >= nc.height):
+                        opp_mob += 1
+                except ValueError:
+                    pass
+
+        return (token_diff
+                + (my_threat - opp_threat) * 1.5
+                + multi_attack
+                + cascade_pressure * 1.0
+                + (my_mob - opp_mob) * 0.2
+                + random.uniform(-0.1, 0.1))
 
     def _attack_cost(self, attackers: dict, targets: dict) -> float:
         # Greedy chain: after eating a target, the attacker moves to that cell
@@ -338,7 +400,7 @@ class Agent:
             if best_ac is None:
                 total += 100   # no valid attacker for this target
                 continue
-            total += -(-min_dist // attackers[best_ac].height)   # ceil division
+            total += min_dist / attackers[best_ac].height
             attackers[tc] = attackers.pop(best_ac)
         return total
 

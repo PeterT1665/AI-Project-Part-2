@@ -20,7 +20,7 @@ matchups = [
     ("v2b_greedy_depth1",  "v2b_greedy_depth1",  "Greedy       (3 marks)"),
     ("v1_minimax",         "v1_minimax",          "Adversarial  (3 marks)"),
     ("v2_alphabeta",       "v2_alphabeta",        "Adversarial  (3 marks)"),
-    ("v5_alphabeta_killer","v5_alphabeta_killer", "Adversarial  (3 marks)"),
+    ("v5-2_alphabeta_killer","v5-2_alphabeta_killer", "Adversarial  (3 marks)"),
     ("v6_cascade_eval",    "v6_cascade_eval",     "Adversarial  (3 marks)"),
 ]
 

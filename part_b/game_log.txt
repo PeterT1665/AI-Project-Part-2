@@ -1,0 +1,82 @@
+T0000.000	referee	game_begin
+T0000.001	RED	initialising
+T0000.120	BLUE	initialising
+T0000.217	RED	turn_begin	1
+T0000.225	RED	turn_end	1	PLACE(3-3)
+T0000.225	referee	board_update
+T0000.234	BLUE	turn_begin	2
+T0000.238	BLUE	turn_end	2	PLACE(4-4)
+T0000.238	referee	board_update
+T0000.247	RED	turn_begin	3
+T0000.254	RED	turn_end	3	PLACE(2-3)
+T0000.254	referee	board_update
+T0000.263	BLUE	turn_begin	4
+T0000.267	BLUE	turn_end	4	PLACE(4-5)
+T0000.267	referee	board_update
+T0000.275	RED	turn_begin	5
+T0000.281	RED	turn_end	5	PLACE(4-2)
+T0000.281	referee	board_update
+T0000.290	BLUE	turn_begin	6
+T0000.293	BLUE	turn_end	6	PLACE(5-3)
+T0000.294	referee	board_update
+T0000.302	RED	turn_begin	7
+T0000.307	RED	turn_end	7	PLACE(2-4)
+T0000.307	referee	board_update
+T0000.316	BLUE	turn_begin	8
+T0000.319	BLUE	turn_end	8	PLACE(3-5)
+T0000.319	referee	board_update
+T0000.327	RED	turn_begin	9
+T0001.372	RED	turn_end	9	MOVE(3-3, [])
+T0001.372	referee	board_update
+T0001.383	BLUE	turn_begin	10
+T0002.658	BLUE	turn_end	10	MOVE(4-5, [])
+T0002.659	referee	board_update
+T0002.669	RED	turn_begin	11
+T0003.820	RED	turn_end	11	MOVE(2-4, [])
+T0003.820	referee	board_update
+T0003.831	BLUE	turn_begin	12
+T0005.108	BLUE	turn_end	12	MOVE(5-3, [])
+T0005.108	referee	board_update
+T0005.122	RED	turn_begin	13
+T0006.454	RED	turn_end	13	MOVE(2-3, [])
+T0006.454	referee	board_update
+T0006.464	BLUE	turn_begin	14
+T0007.741	BLUE	turn_end	14	MOVE(6-3, [])
+T0007.741	referee	board_update
+T0007.752	RED	turn_begin	15
+T0008.788	RED	turn_end	15	MOVE(4-2, [])
+T0008.788	referee	board_update
+T0008.798	BLUE	turn_begin	16
+T0010.076	BLUE	turn_end	16	MOVE(3-5, [])
+T0010.076	referee	board_update
+T0010.088	RED	turn_begin	17
+T0013.813	RED	turn_end	17	MOVE(3-2, [])
+T0013.814	referee	board_update
+T0013.824	BLUE	turn_begin	18
+T0015.101	BLUE	turn_end	18	MOVE(3-6, [])
+T0015.102	referee	board_update
+T0015.114	RED	turn_begin	19
+T0016.752	RED	turn_end	19	MOVE(2-2, [])
+T0016.752	referee	board_update
+T0016.762	BLUE	turn_begin	20
+T0018.039	BLUE	turn_end	20	MOVE(2-6, [])
+T0018.039	referee	board_update
+T0018.053	RED	turn_begin	21
+T0020.401	RED	turn_end	21	MOVE(1-2, [])
+T0020.402	referee	board_update
+T0020.416	BLUE	turn_begin	22
+T0021.693	BLUE	turn_end	22	MOVE(1-6, [])
+T0021.693	referee	board_update
+T0021.708	RED	turn_begin	23
+T0024.491	RED	turn_end	23	MOVE(2-2, [])
+T0024.492	referee	board_update
+T0024.503	BLUE	turn_begin	24
+T0025.780	BLUE	turn_end	24	MOVE(2-6, [])
+T0025.780	referee	board_update
+T0025.793	RED	turn_begin	25
+T0029.359	RED	turn_end	25	MOVE(1-2, [])
+T0029.360	referee	board_update
+T0029.371	BLUE	turn_begin	26
+T0030.648	BLUE	turn_end	26	MOVE(1-6, [])
+T0030.649	referee	board_update
+T0030.684	referee	game_end	winner:None
