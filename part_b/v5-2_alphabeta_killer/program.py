@@ -75,6 +75,7 @@ class Agent:
         legal_actions = self._legal_play_actions(self._color)
         best_move = None
         for depth_limit in range(1,20):
+            self.killers = [None] * 50
             if time.time() - self.start > self.time_budget:
                 break
             alpha = -Math.inf
@@ -89,7 +90,7 @@ class Agent:
 
                 self._board.apply_action(action)
                 try:
-                    eval = self._minimax(0, alpha, Math.inf,depth_limit)
+                    eval = self._minimax(1, alpha, Math.inf,depth_limit)
                 except TimeoutException:
                     budget_depleted = True
                     self._board.undo_action()
@@ -241,9 +242,9 @@ class Agent:
             
             flag = -1
             if(lowest >= prev_beta):
-                flag = UPPER_FLAG
-            elif(lowest<= alpha):
                 flag = LOWER_FLAG
+            elif(lowest<= alpha):
+                flag = UPPER_FLAG
             else:
                 flag = EXACT_FLAG
             if(len(self.transposition_table)< MAX_TRANSPOSITIONS):
