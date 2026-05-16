@@ -10,11 +10,11 @@ from referee.game.board import Board, GamePhase
 from referee.game.coord import CARDINAL_DIRECTIONS
 from referee.game.constants import BOARD_N
 
-MAX_DEPTH      = 8
+MAX_DEPTH      = 10
 QDEPTH         = 2       # extra depth for captures after horizon
-TIME_LIMIT_MAX = 5.0
+TIME_LIMIT_MAX = 10.0
 TIME_LIMIT_MIN = 0.5
-TT_SIZE        = 1 << 18  # transposition table slots
+TT_SIZE        = 1 << 20  # transposition table slots (1M)
 
 EXACT = 0
 LOWER = 1
@@ -87,16 +87,15 @@ class Agent:
         self._turns_played = 0
 
     def action(self, **referee: dict) -> Action:
-        # placement phase has its own logic
         if self._board.phase == GamePhase.PLACEMENT:
             return self._best_placement()
 
-        # spread time budget evenly across remaining turns
+        # spread time budget across remaining turns; spend more in endgame
         time_rem = referee.get('time_remaining', 60.0)
         self._turns_played += 1
-        turns_left = max(20, 150 - self._turns_played)
+        turns_left = max(10, 120 - self._turns_played)
         self._time_limit = max(TIME_LIMIT_MIN,
-                               min(TIME_LIMIT_MAX, time_rem / turns_left * 0.85))
+                               min(TIME_LIMIT_MAX, time_rem / turns_left))
 
         self._start_t = time.time()
         best       = None
@@ -127,13 +126,10 @@ class Agent:
 
     def update(self, color: PlayerColor, action: Action, **referee: dict):
         self._board.apply_action(action)
-        # track position hashes to detect repetition
         zh = _hash_state(self._board._state)
         self._pos_hist.append(zh)
         if len(self._pos_hist) > 16:
             self._pos_hist.pop(0)
-
-    # ---- placement phase -------------------------------------------------------
 
     def _best_placement(self) -> PlaceAction:
         best_score = -math.inf
@@ -146,10 +142,6 @@ class Agent:
         return best_place
 
     def _score_placement(self, coord: Coord) -> float:
-        # 1. prefer center — more cascade reach and escape routes
-        # 2. pick cells that give good coverage (cascade range)
-        # 3. place next to existing friendly towers for merge potential
-        # 4. pressure opponent by placing nearby
         state  = self._board._state
         color  = self._color
         opp    = self._opp
@@ -158,7 +150,6 @@ class Agent:
         center_score = -(abs(r - 3.5) + abs(c - 3.5))
         coverage     = _cascade_reach(coord, 3)
 
-        # score based on proximity to friendly towers
         support  = 0.0
         my_count = 0
         for tc, cell in state.items():
@@ -173,7 +164,6 @@ class Agent:
             elif d <= 4:
                 support += 0.5
 
-        # limit opponent's available placement cells
         opp_pressure = 0.0
         for tc, cell in state.items():
             if cell.color != opp:
@@ -184,15 +174,13 @@ class Agent:
             elif d <= 3:
                 opp_pressure += 1.0
 
-        # place second piece adjacent to first so they can merge immediately in play phase
+        # force adjacency on piece 2 so turn-1 merge is available
         if my_count == 1:
             for tc, cell in state.items():
                 if cell.color == color and _mhdist(tc, coord) == 1:
                     return 200.0
 
         return 2.0 * center_score + 0.8 * coverage + support + opp_pressure
-
-    # ---- search ----------------------------------------------------------------
 
     def _root(self, depth: int, alpha: float, beta: float):
         best_move = None
@@ -227,11 +215,9 @@ class Agent:
 
         zh = _hash_state(self._board._state)
 
-        # treat repeated positions as draws to avoid loops
         if self._pos_hist.count(zh) >= 2:
             return 0.0
 
-        # transposition table lookup
         hit     = self._tt.probe(zh)
         tt_move = None
         if hit:
@@ -252,7 +238,7 @@ class Agent:
         for move_idx, action in enumerate(moves):
             self._board.apply_action(action)
 
-            # late move reduction — search quiet late moves at shallower depth
+            # late move reduction — quiet late moves searched at shallower depth
             reduce = (
                 depth >= 3 and
                 move_idx >= 4 and
@@ -261,7 +247,6 @@ class Agent:
             )
             val = self._minimax(depth - 1 - (1 if reduce else 0), alpha, beta, not is_max)
 
-            # re-search at full depth if reduced result looks promising
             if reduce and ((is_max and val > alpha) or (not is_max and val < beta)):
                 val = self._minimax(depth - 1, alpha, beta, not is_max)
 
@@ -323,14 +308,11 @@ class Agent:
                     break
             return beta
 
-    # ---- evaluation ------------------------------------------------------------
-
     def _evaluate(self) -> float:
         state = self._board._state
         color = self._color
         opp   = self._opp
 
-        # get all active towers for each side
         my_towers  = {c: v for c, v in state.items() if v.color == color and v.height > 0}
         opp_towers = {c: v for c, v in state.items() if v.color == opp   and v.height > 0}
 
@@ -353,7 +335,6 @@ class Agent:
             if v.height > 6:
                 height_penalty += (v.height - 6) * 2.0
 
-        # cell control — sum of cascade reach for each tower
         my_ctrl  = sum(_cascade_reach(mc, mv.height) for mc, mv in my_towers.items())
         opp_ctrl = sum(_cascade_reach(tc, tv.height) for tc, tv in opp_towers.items())
         control_diff = (my_ctrl - opp_ctrl) * 0.3
@@ -393,19 +374,60 @@ class Agent:
                 assigned[tc] = best_mc
         pairing = len(set(assigned.values())) * 1.5
 
+        # reward enemies on our cascade lines; scale up when they're near the edge
+        # in our cascade direction — less room to escape = higher threat
+        cascade_line_bonus = 0.0
+        for mc, mv in my_towers.items():
+            h = min(mv.height, 6)
+            if h < 2:
+                continue
+            for tc, tv in opp_towers.items():
+                if mc.r == tc.r or mc.c == tc.c:
+                    d = _mhdist(mc, tc)
+                    if 1 <= d <= h:
+                        if mc.r == tc.r:
+                            edge_in_dir = (7 - tc.c) if tc.c > mc.c else tc.c
+                        else:
+                            edge_in_dir = (7 - tc.r) if tc.r > mc.r else tc.r
+                        edge_trap = max(0, 3 - edge_in_dir)
+                        cascade_line_bonus += (1.0 + 0.5 * edge_trap) / (d + 1)
+        for tc, tv in opp_towers.items():
+            h = min(tv.height, 6)
+            if h < 2:
+                continue
+            for mc, mv in my_towers.items():
+                if tc.r == mc.r or tc.c == mc.c:
+                    d = _mhdist(tc, mc)
+                    if 1 <= d <= h:
+                        cascade_line_bonus -= 0.5 / (d + 1)
+
+        # multi-tower coordination — bonus when 2+ friendly towers threaten the same enemy;
+        # double-teaming is more reliable than one merged tower
+        coord_bonus = 0.0
+        for tc, tv in opp_towers.items():
+            attackers = 0
+            for mc, mv in my_towers.items():
+                h = min(mv.height, 6)
+                if mv.height >= tv.height and _mhdist(mc, tc) == 1:
+                    attackers += 1  # direct eat
+                elif h >= 2 and (mc.r == tc.r or mc.c == tc.c):
+                    if 1 <= _mhdist(mc, tc) <= h:
+                        attackers += 1  # cascade through
+            if attackers >= 2:
+                coord_bonus += min(attackers - 1, 2) * 0.8
+
         return (token_diff
                 + height_penalty
                 + control_diff
                 + edge_pressure
                 + (my_threat - opp_threat) * 1.5
                 + pairing
+                + cascade_line_bonus * 0.6
+                + coord_bonus
                 + random.uniform(-0.05, 0.05))
 
-    # ---- move ordering ---------------------------------------------------------
-
     def _ordered_actions(self, color: PlayerColor, depth: int, tt_move) -> list:
-        # order: TT move -> eats -> killers -> cascades -> moves
-        # (all sorted by history score within their group)
+        # TT move first, then eats, killers, cascades, moves (history-sorted within group)
         state = self._board._state
         opp   = color.opponent
         eats, cascades, moves = [], [], []
@@ -452,7 +474,6 @@ class Agent:
         return ordered
 
     def _captures(self, color: PlayerColor) -> list:
-        # eat and cascade-through-enemy actions for quiescence search
         state  = self._board._state
         opp    = color.opponent
         result = []
@@ -479,8 +500,6 @@ class Agent:
                         except ValueError:
                             break
         return result
-
-    # ---- helpers ---------------------------------------------------------------
 
     def _store_killer(self, depth: int, action: Action):
         if action != self._killers[depth][0]:

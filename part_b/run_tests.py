@@ -2,64 +2,60 @@ from subprocess import run
 import sys
 
 """
-Test v7_iddfs against agents in all 3 benchmark categories:
-  - Random (5 marks):           v0_random
-  - Greedy (3 marks):           v2b_greedy_depth1
-  - Adversarial search (3 marks): v1_minimax, v2_alphabeta, v5_alphabeta_killer, v6_cascade_eval
+Benchmark v8_new against agents in all 3 Gradescope categories:
+  - Random      (5 marks): v0_random
+  - Greedy      (3 marks): v2b_greedy_depth1
+  - Adversarial (3 marks): v2_alphabeta (easy), v5-2_alphabeta_killer (med), v7_iddfs (hard)
 
-Each matchup runs GAMES games with v7 as RED, then GAMES games with v7 as BLUE.
+Each matchup runs 1 game with v8 as RED and 1 game with v8 as BLUE (2 total per opponent).
 """
 
-PYTHON  = sys.executable
-GAMES   = 5   # per side (10 total per matchup)
-V7      = "v7_iddfs"
+PYTHON = sys.executable
+AGENT  = "v8_new"
 
 matchups = [
     # (label, opponent, category)
-    ("v0_random",          "v0_random",          "Random       (5 marks)"),
-    ("v2b_greedy_depth1",  "v2b_greedy_depth1",  "Greedy       (3 marks)"),
-    ("v1_minimax",         "v1_minimax",          "Adversarial  (3 marks)"),
-    ("v2_alphabeta",       "v2_alphabeta",        "Adversarial  (3 marks)"),
-    ("v5-2_alphabeta_killer","v5-2_alphabeta_killer", "Adversarial  (3 marks)"),
-    ("v6_cascade_eval",    "v6_cascade_eval",     "Adversarial  (3 marks)"),
+    ("random_agent",    "random_agent",    "Random       (5 marks)"),
+    ("greedy",          "greedy",          "Greedy       (3 marks) — easy"),
+    ("adversarial_easy","adversarial_easy","Adversarial  (3 marks) — easy"),
+    ("adversarial_med", "adversarial_med", "Adversarial  (3 marks) — med"),
+    ("adversarial_hard","adversarial_hard","Adversarial  (3 marks) — hard"),
 ]
 
-def run_games(red, blue, n):
-    wins_red = wins_blue = 0
-    for i in range(n):
-        out = run([PYTHON, "-m", "referee", red, blue],
-                  capture_output=True, text=True)
-        wins_red  += out.stdout.count("winner is RED")
-        wins_blue += out.stdout.count("winner is BLUE")
-        draws = (i + 1) - wins_red - wins_blue
-        print(f"  game {i+1}/{n}: RED={wins_red} BLUE={wins_blue} DRAW={draws}", flush=True)
-    draws = n - wins_red - wins_blue
-    return wins_red, wins_blue, draws
 
-total_wins = total_played = 0
+def run_game(red, blue):
+    out = run([PYTHON, "-m", "referee", red, blue], capture_output=True, text=True)
+    if "winner is RED"  in out.stdout: return "RED"
+    if "winner is BLUE" in out.stdout: return "BLUE"
+    return "DRAW"
+
+
+total_wins = total_draws = total_loss = 0
 
 for label, opp, category in matchups:
     print(f"\n{'='*60}")
-    print(f"  {V7} vs {label}  [{category}]")
+    print(f"  {AGENT} vs {label}  [{category}]")
     print(f"{'='*60}")
 
-    print(f"\n  v7 as RED vs {opp} as BLUE ({GAMES} games):")
-    wr, wb, wd = run_games(V7, opp, GAMES)
-    v7_as_red = wr
+    # game 1: v8 as RED
+    r1 = run_game(AGENT, opp)
+    print(f"  {AGENT}(RED)  vs {opp}(BLUE): {r1}")
 
-    print(f"\n  v7 as BLUE vs {opp} as RED ({GAMES} games):")
-    wr, wb, wd2 = run_games(opp, V7, GAMES)
-    v7_as_blue = wb
+    # game 2: v8 as BLUE
+    r2 = run_game(opp, AGENT)
+    print(f"  {opp}(RED)  vs {AGENT}(BLUE): {r2}")
 
-    v7_wins  = v7_as_red + v7_as_blue
-    v7_draws = wd + wd2
-    v7_loss  = GAMES * 2 - v7_wins - v7_draws
-    total_wins   += v7_wins
-    total_played += GAMES * 2
+    wins  = (1 if r1 == "RED"  else 0) + (1 if r2 == "BLUE" else 0)
+    draws = (1 if r1 == "DRAW" else 0) + (1 if r2 == "DRAW" else 0)
+    loss  = (1 if r1 == "BLUE" else 0) + (1 if r2 == "RED"  else 0)
 
-    print(f"\n  RESULT  v7 W={v7_wins}  D={v7_draws}  L={v7_loss}  "
-          f"(out of {GAMES*2} games)")
+    total_wins  += wins
+    total_draws += draws
+    total_loss  += loss
+
+    print(f"\n  RESULT  {AGENT} W={wins}  D={draws}  L={loss}  (out of 2 games)")
 
 print(f"\n{'='*60}")
-print(f"  OVERALL  v7 wins {total_wins}/{total_played} games across all matchups")
+print(f"  OVERALL  W={total_wins}  D={total_draws}  L={total_loss}  "
+      f"(out of {total_wins + total_draws + total_loss} games)")
 print(f"{'='*60}\n")

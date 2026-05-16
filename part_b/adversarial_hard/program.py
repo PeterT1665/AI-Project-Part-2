@@ -10,22 +10,21 @@ from referee.game.board import Board, GamePhase
 from referee.game.coord import CARDINAL_DIRECTIONS
 from referee.game.constants import BOARD_N
 
-MAX_DEPTH      = 10
-QDEPTH         = 2       # extra depth for captures after horizon
-TIME_LIMIT_MAX = 10.0
-TIME_LIMIT_MIN = 0.5
-TT_SIZE        = 1 << 20  # transposition table slots (1M)
+MAX_DEPTH      = 8
+QDEPTH         = 2
+TIME_LIMIT_MAX = 5.0   # hard ceiling per move (seconds)
+TIME_LIMIT_MIN = 0.5   # floor so we always do at least 1 full depth
+TT_SIZE        = 1 << 18   # 256 K slots
 
 EXACT = 0
 LOWER = 1
 UPPER = 2
 
-# Zobrist hashing — fixed seed so it is the same every run
+# Zobrist table — seeded so it's the same every run
 _rng = random.Random(0xDEADC0DE)
 _ZOB = [[[_rng.getrandbits(64) for _ in range(13)]
           for _ in range(2)]
          for _ in range(64)]
-
 
 def _hash_state(state: dict) -> int:
     h = 0
@@ -33,17 +32,6 @@ def _hash_state(state: dict) -> int:
         ci = 0 if cell.color == PlayerColor.RED else 1
         h ^= _ZOB[coord.r * 8 + coord.c][ci][min(cell.height, 12)]
     return h
-
-
-def _mhdist(a: Coord, b: Coord) -> int:
-    return abs(a.r - b.r) + abs(a.c - b.c)
-
-
-def _cascade_reach(coord: Coord, height: int) -> int:
-    # number of cells reachable by cascade in 4 directions, capped at h6
-    h = min(height, 6)
-    r, c = coord.r, coord.c
-    return min(h, r) + min(h, 7 - r) + min(h, c) + min(h, 7 - c)
 
 
 class _TTable:
@@ -76,32 +64,33 @@ class _TTable:
 class Agent:
     def __init__(self, color: PlayerColor, **referee: dict):
         self._color = color
-        self._opp   = color.opponent
+        self._opp = color.opponent
         self._board = Board()
-        self._tt    = _TTable()
-        self._killers    = [[None, None] for _ in range(MAX_DEPTH + QDEPTH + 2)]
-        self._history    = {}
-        self._pos_hist   = []
-        self._start_t    = 0.0
+        self._tt = _TTable()
+        self._killers = [[None, None] for _ in range(MAX_DEPTH + QDEPTH + 2)]
+        self._history = {}   # action_key -> cutoff score
+        self._pos_hist = []  # Zobrist hashes of real-game positions (last 16)
+        self._start_t = 0.0
         self._time_limit = TIME_LIMIT_MAX
         self._turns_played = 0
+
 
     def action(self, **referee: dict) -> Action:
         if self._board.phase == GamePhase.PLACEMENT:
             return self._best_placement()
 
-        # spread time budget across remaining turns; spend more in endgame
+        # Spread remaining time evenly across remaining turns
         time_rem = referee.get('time_remaining', 60.0)
         self._turns_played += 1
-        turns_left = max(10, 120 - self._turns_played)
+        turns_left = max(20, 150 - self._turns_played)
         self._time_limit = max(TIME_LIMIT_MIN,
-                               min(TIME_LIMIT_MAX, time_rem / turns_left))
+                               min(TIME_LIMIT_MAX, time_rem / turns_left * 0.85))
 
         self._start_t = time.time()
-        best       = None
+        best = None
         prev_score = 0
 
-        # iterative deepening with aspiration windows
+        # Iterative deepening with aspiration windows
         for depth in range(1, MAX_DEPTH + 1):
             if self._timed_out():
                 break
@@ -111,7 +100,7 @@ class Agent:
             else:
                 delta = 30
                 move, score = self._root(depth, prev_score - delta, prev_score + delta)
-                # re-search with full window if result fell outside aspiration window
+                # Re-search with full window if result fell outside aspiration window
                 if (abs(score) < math.inf and
                         (score <= prev_score - delta or score >= prev_score + delta)):
                     move, score = self._root(depth, -math.inf, math.inf)
@@ -120,7 +109,7 @@ class Agent:
                 best = move
             prev_score = score
             if abs(score) >= math.inf:
-                break  # forced win or loss — no point searching deeper
+                break   # forced win or loss — no point searching deeper
 
         return best
 
@@ -142,51 +131,44 @@ class Agent:
         return best_place
 
     def _score_placement(self, coord: Coord) -> float:
-        state  = self._board._state
-        color  = self._color
-        opp    = self._opp
-        r, c   = coord.r, coord.c
+        state = self._board._state
+        color = self._color
+        team_count = sum(1 for c in state.values() if c.color == color)
 
-        center_score = -(abs(r - 3.5) + abs(c - 3.5))
-        coverage     = _cascade_reach(coord, 3)
+        center = -(abs(coord.r - 3.5) + abs(coord.c - 3.5))
 
-        support  = 0.0
-        my_count = 0
+        spread = math.inf
         for tc, cell in state.items():
-            if cell.color != color:
-                continue
-            my_count += 1
-            d = _mhdist(tc, coord)
-            if d == 1:
-                support += 5.0
-            elif d == 2:
-                support += 1.5
-            elif d <= 4:
-                support += 0.5
+            if cell.color == color:
+                spread = min(spread, _mhdist(tc, coord))
+        if spread == math.inf:
+            spread = 0
 
-        opp_pressure = 0.0
-        for tc, cell in state.items():
-            if cell.color != opp:
-                continue
-            d = _mhdist(tc, coord)
-            if d == 1:
-                opp_pressure += 3.0
-            elif d <= 3:
-                opp_pressure += 1.0
+        cascade = 0
+        for d in CARDINAL_DIRECTIONS:
+            if   d == Direction.Right: cnt = 7 - coord.c
+            elif d == Direction.Down:  cnt = 7 - coord.r
+            elif d == Direction.Left:  cnt = coord.c
+            else:                      cnt = coord.r
+            if cnt <= 3:
+                cascade += cnt
 
-        # force adjacency on piece 2 so turn-1 merge is available
-        if my_count == 1:
+        # 2nd tower: place adjacent to 1st to enable immediate merge to height-6
+        if team_count == 1:
             for tc, cell in state.items():
                 if cell.color == color and _mhdist(tc, coord) == 1:
-                    return 200.0
+                    return center + 100
 
-        return 2.0 * center_score + 0.8 * coverage + support + opp_pressure
+        return 2 * center + spread + 1.5 * cascade
 
     def _root(self, depth: int, alpha: float, beta: float):
         best_move = None
-        zh  = _hash_state(self._board._state)
+        zh = _hash_state(self._board._state)
+
+        tt_move = None
         hit = self._tt.probe(zh)
-        tt_move = hit[3] if hit else None
+        if hit:
+            tt_move = hit[3]
 
         moves = self._ordered_actions(self._color, 0, tt_move)
 
@@ -215,10 +197,11 @@ class Agent:
 
         zh = _hash_state(self._board._state)
 
+        # Positions seen 2+ times in real game: treat as draw to avoid repetition
         if self._pos_hist.count(zh) >= 2:
             return 0.0
 
-        hit     = self._tt.probe(zh)
+        hit = self._tt.probe(zh)
         tt_move = None
         if hit:
             tt_val, tt_depth, tt_flag, tt_move = hit
@@ -228,17 +211,17 @@ class Agent:
                 if tt_flag == UPPER: beta  = min(beta,  tt_val)
                 if alpha >= beta:                        return tt_val
 
-        color     = self._color if is_max else self._opp
-        moves     = self._ordered_actions(color, depth, tt_move)
-        orig_a    = alpha
-        orig_b    = beta
-        best      = -math.inf if is_max else math.inf
+        color = self._color if is_max else self._opp
+        moves = self._ordered_actions(color, depth, tt_move)
+        orig_a = alpha
+        orig_b = beta
+        best = -math.inf if is_max else math.inf
         best_move = tt_move
 
         for move_idx, action in enumerate(moves):
             self._board.apply_action(action)
 
-            # late move reduction — quiet late moves searched at shallower depth
+            # Late move reductions: search quiet late moves at shallower depth
             reduce = (
                 depth >= 3 and
                 move_idx >= 4 and
@@ -247,19 +230,21 @@ class Agent:
             )
             val = self._minimax(depth - 1 - (1 if reduce else 0), alpha, beta, not is_max)
 
-            if reduce and ((is_max and val > alpha) or (not is_max and val < beta)):
-                val = self._minimax(depth - 1, alpha, beta, not is_max)
+            # Re-search at full depth if the reduced result looks promising
+            if reduce:
+                if (is_max and val > alpha) or (not is_max and val < beta):
+                    val = self._minimax(depth - 1, alpha, beta, not is_max)
 
             self._board.undo_action()
 
             if is_max:
                 if val > best:
-                    best      = val
+                    best = val
                     best_move = action
                 alpha = max(alpha, val)
             else:
                 if val < best:
-                    best      = val
+                    best = val
                     best_move = action
                 beta = min(beta, val)
 
@@ -279,7 +264,6 @@ class Agent:
         return best
 
     def _quiescence(self, alpha: float, beta: float, qdepth: int, is_max: bool) -> float:
-        # evaluate captures only to avoid horizon effect
         stand_pat = self._evaluate()
 
         if qdepth == 0:
@@ -311,7 +295,7 @@ class Agent:
     def _evaluate(self) -> float:
         state = self._board._state
         color = self._color
-        opp   = self._opp
+        opp = self._opp
 
         my_towers  = {c: v for c, v in state.items() if v.color == color and v.height > 0}
         opp_towers = {c: v for c, v in state.items() if v.color == opp   and v.height > 0}
@@ -322,31 +306,13 @@ class Agent:
         my_h  = sum(v.height for v in my_towers.values())
         opp_h = sum(v.height for v in opp_towers.values())
 
-        # token count is the win condition so it gets the highest weight
+        # Token count — endgame win condition, highest weight
         token_diff = (my_h - opp_h) * 2.0
 
-        # penalise towers above h6 — merging past 6 just concentrates tokens
-        # without gaining new reach (cascade can already hit any height)
-        height_penalty = 0.0
-        for v in my_towers.values():
-            if v.height > 6:
-                height_penalty -= (v.height - 6) * 2.0
-        for v in opp_towers.values():
-            if v.height > 6:
-                height_penalty += (v.height - 6) * 2.0
-
-        my_ctrl  = sum(_cascade_reach(mc, mv.height) for mc, mv in my_towers.items())
-        opp_ctrl = sum(_cascade_reach(tc, tv.height) for tc, tv in opp_towers.items())
-        control_diff = (my_ctrl - opp_ctrl) * 0.3
-
-        # edge pressure — we want our towers central and opponent towers on the edge
-        # min(r, 7-r, c, 7-c) is 0 on the edge and up to 3 at the centre
-        my_edge_val  = sum(min(mc.r, 7 - mc.r, mc.c, 7 - mc.c) for mc in my_towers) * 0.2
-        opp_edge_val = sum(min(tc.r, 7 - tc.r, tc.c, 7 - tc.c) for tc in opp_towers) * 0.4
-        edge_pressure = my_edge_val - opp_edge_val
-
-        # threat quality — for each enemy find our closest eligible attacker
-        # cap at min(attacker, target) so there is no incentive to over-merge
+        # Threat quality: for each enemy find our best eligible attacker scored as
+        # height/(dist+1) — tall towers close to weak enemies score highest.
+        # This gives a smooth gradient for distance AND height in one term,
+        # so a merge that creates R6 close to an enemy beats scattered H1 debris.
         my_threat = sum(
             max((min(mv.height, tv.height) / (_mhdist(mc, tc) + 1)
                  for mc, mv in my_towers.items() if mv.height >= tv.height),
@@ -360,76 +326,87 @@ class Agent:
             for mc, mv in my_towers.items()
         )
 
-        # pairing bonus — count distinct friendly towers each hunting a different enemy
-        # two separate hunters > one merged hunter
+        # Multi-attack: count distinct my towers (h>=3) that are the highest-quality
+        # threat to DIFFERENT enemies — two towers each owning a separate enemy > one tower
         assigned = {}
         for tc, tv in opp_towers.items():
             best_q, best_mc = 0.0, None
             for mc, mv in my_towers.items():
                 if mv.height >= tv.height and mv.height >= 3:
-                    q = min(mv.height, tv.height) / (_mhdist(mc, tc) + 1)
+                    q = mv.height / (_mhdist(mc, tc) + 1)
                     if q > best_q:
                         best_q, best_mc = q, mc
             if best_mc is not None:
                 assigned[tc] = best_mc
-        pairing = len(set(assigned.values())) * 1.5
+        multi_attack = len(set(assigned.values())) * 2.0
 
-        # reward enemies on our cascade lines; scale up when they're near the edge
-        # in our cascade direction — less room to escape = higher threat
-        cascade_line_bonus = 0.0
+        # Directional cascade pressure: aligned + pushing enemy toward nearest edge
+        cascade_pressure = 0.0
+        for tc, tv in opp_towers.items():
+            for mc, mv in my_towers.items():
+                if mv.height < tv.height:
+                    continue
+                if mc.r == tc.r and mc.c != tc.c:
+                    edge_exp = (7 - tc.c) if mc.c < tc.c else tc.c
+                    cascade_pressure += 1.0 / ((abs(mc.c - tc.c) + 1) * (edge_exp + 1))
+                elif mc.c == tc.c and mc.r != tc.r:
+                    edge_exp = (7 - tc.r) if mc.r < tc.r else tc.r
+                    cascade_pressure += 1.0 / ((abs(mc.r - tc.r) + 1) * (edge_exp + 1))
+
+        # Mobility balance: (my escape routes - opp escape routes)
+        my_mob = opp_mob = 0
         for mc, mv in my_towers.items():
-            h = min(mv.height, 6)
-            if h < 2:
-                continue
-            for tc, tv in opp_towers.items():
-                if mc.r == tc.r or mc.c == tc.c:
-                    d = _mhdist(mc, tc)
-                    if 1 <= d <= h:
-                        if mc.r == tc.r:
-                            edge_in_dir = (7 - tc.c) if tc.c > mc.c else tc.c
-                        else:
-                            edge_in_dir = (7 - tc.r) if tc.r > mc.r else tc.r
-                        edge_trap = max(0, 3 - edge_in_dir)
-                        cascade_line_bonus += (1.0 + 0.5 * edge_trap) / (d + 1)
+            for d in CARDINAL_DIRECTIONS:
+                try:
+                    nc = self._board[mc + d]
+                    if nc.is_empty or nc.color == color or (nc.color == opp and mv.height >= nc.height):
+                        my_mob += 1
+                except ValueError:
+                    pass
         for tc, tv in opp_towers.items():
-            h = min(tv.height, 6)
-            if h < 2:
-                continue
-            for mc, mv in my_towers.items():
-                if tc.r == mc.r or tc.c == mc.c:
-                    d = _mhdist(tc, mc)
-                    if 1 <= d <= h:
-                        cascade_line_bonus -= 0.5 / (d + 1)
-
-        # multi-tower coordination — bonus when 2+ friendly towers threaten the same enemy;
-        # double-teaming is more reliable than one merged tower
-        coord_bonus = 0.0
-        for tc, tv in opp_towers.items():
-            attackers = 0
-            for mc, mv in my_towers.items():
-                h = min(mv.height, 6)
-                if mv.height >= tv.height and _mhdist(mc, tc) == 1:
-                    attackers += 1  # direct eat
-                elif h >= 2 and (mc.r == tc.r or mc.c == tc.c):
-                    if 1 <= _mhdist(mc, tc) <= h:
-                        attackers += 1  # cascade through
-            if attackers >= 2:
-                coord_bonus += min(attackers - 1, 2) * 0.8
+            for d in CARDINAL_DIRECTIONS:
+                try:
+                    nc = self._board[tc + d]
+                    if nc.is_empty or nc.color == opp or (nc.color == color and tv.height >= nc.height):
+                        opp_mob += 1
+                except ValueError:
+                    pass
 
         return (token_diff
-                + height_penalty
-                + control_diff
-                + edge_pressure
                 + (my_threat - opp_threat) * 1.5
-                + pairing
-                + cascade_line_bonus * 0.6
-                + coord_bonus
-                + random.uniform(-0.05, 0.05))
+                + multi_attack
+                + cascade_pressure * 1.0
+                + (my_mob - opp_mob) * 0.2
+                + random.uniform(-0.1, 0.1))
+
+    def _attack_cost(self, attackers: dict, targets: dict) -> float:
+        # Greedy chain: after eating a target, the attacker moves to that cell
+        # so it can chain into the next target from a closer position
+        attackers = dict(attackers)   # shallow copy — we mutate positions
+        total = 0
+        for tc, tv in targets.items():
+            if not attackers:
+                break
+            min_dist = math.inf
+            best_ac = None
+            for ac, av in attackers.items():
+                if av.height < tv.height:
+                    continue
+                d = _mhdist(ac, tc)
+                if d < min_dist:
+                    min_dist = d
+                    best_ac = ac
+            if best_ac is None:
+                total += 100   # no valid attacker for this target
+                continue
+            total += min_dist / attackers[best_ac].height
+            attackers[tc] = attackers.pop(best_ac)
+        return total
 
     def _ordered_actions(self, color: PlayerColor, depth: int, tt_move) -> list:
-        # TT move first, then eats, killers, cascades, moves (history-sorted within group)
+        # Order: TT move -> eats -> killers -> cascades (by history) -> moves (by history)
         state = self._board._state
-        opp   = color.opponent
+        opp = color.opponent
         eats, cascades, moves = [], [], []
 
         for coord, cell in state.items():
@@ -474,8 +451,9 @@ class Agent:
         return ordered
 
     def _captures(self, color: PlayerColor) -> list:
-        state  = self._board._state
-        opp    = color.opponent
+        # Eat + cascade-through-enemy actions for quiescence search
+        state = self._board._state
+        opp = color.opponent
         result = []
         for coord, cell in state.items():
             if cell.color != color:
@@ -538,3 +516,7 @@ class Agent:
             except ValueError:
                 pass
         return False
+
+
+def _mhdist(a: Coord, b: Coord) -> int:
+    return abs(a.r - b.r) + abs(a.c - b.c)
