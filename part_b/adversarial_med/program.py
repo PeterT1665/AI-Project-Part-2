@@ -8,17 +8,13 @@ from referee.game import PlayerColor, Coord, Direction, \
 from referee.game.board import Board, GamePhase
 from referee.game.coord import CARDINAL_DIRECTIONS
 from referee.game.constants import BOARD_N
-import sys
 import time
 
 MAX_TRANSPOSITIONS = 1_000_000
 MAX_TURNS = 300
-TIME_LIMIT = 180
 PLACEMENT_TURNS = 8
 
-
-# transposition table flags
-EXACT_FLAG = 0 
+EXACT_FLAG = 0
 UPPER_FLAG = 1
 LOWER_FLAG = 2
 
@@ -26,30 +22,21 @@ LOWER_FLAG = 2
 class TimeoutException(Exception):
     pass
 
+
 class Agent:
 
     def __init__(self, color: PlayerColor, **referee: dict):
         self._color = color
         self._board = Board()
-
-        self.node_count = 0
-        self.transpositions_added = 0
-        self.transpositions_used = 0
-        
         self.zobrist_table = {}
         self._init_zobrist_hash()
-
         self.transposition_table = {}
-
         self.start = 0
         self.time_budget = 0
-
-        # create list of killers for killer heuristic
-        self.killers = [None] * (50)
+        self.killers = [None] * 50
 
     def action(self, **referee: dict) -> Action:
-        self.start=time.time()
-
+        self.start = time.time()
         self.time_budget = self._budget_time(referee)
 
         if self._board.phase == GamePhase.PLACEMENT:
@@ -60,13 +47,11 @@ class Agent:
                 if score > maxEval:
                     maxEval = score
                     bestPlace = action
-
             return bestPlace
-        
-        nodes = self.node_count
+
         legal_actions = self._legal_play_actions(self._color)
         best_move = None
-        for depth_limit in range(1,20):
+        for depth_limit in range(1, 20):
             self.killers = [None] * 50
             if time.time() - self.start > self.time_budget:
                 break
@@ -75,14 +60,13 @@ class Agent:
             budget_depleted = False
 
             for action in legal_actions:
-
                 if time.time() - self.start > self.time_budget:
                     budget_depleted = True
                     break
 
                 self._board.apply_action(action)
                 try:
-                    eval = self._minimax(1, alpha, Math.inf,depth_limit)
+                    eval = self._minimax(1, alpha, Math.inf, depth_limit)
                 except TimeoutException:
                     budget_depleted = True
                     self._board.undo_action()
@@ -96,73 +80,48 @@ class Agent:
                 if iterations_bestMove is None or eval > alpha:
                     iterations_bestMove = action
                     alpha = eval
-            
-            if(not budget_depleted and iterations_bestMove is not None):
+
+            if not budget_depleted and iterations_bestMove is not None:
                 best_move = iterations_bestMove
                 legal_actions.remove(best_move)
-                legal_actions.insert(0,best_move)
-
-            
+                legal_actions.insert(0, best_move)
 
         return best_move
 
-
-    def _budget_time(self,referee:dict):
+    def _budget_time(self, referee: dict):
         time_remaining = referee["time_remaining"]
-        turns_left = max(1,(MAX_TURNS - PLACEMENT_TURNS - self._board.turn_count)/2)
-        time_remaining/turns_left
+        turns_left = max(1, (MAX_TURNS - PLACEMENT_TURNS - self._board.turn_count) / 2)
+        end_game = 1 - (min(self._board.red_tokens, self._board.blue_tokens) / 12)
+        scale = 1 + 2 * end_game
+        return (time_remaining / turns_left) * scale
 
-        end_game = 1 - (min(self._board.red_tokens,self._board.blue_tokens)/12)
-
-        scale = 1+2*end_game
-
-
-        return (time_remaining/turns_left)*scale
-
-        
-
-
-
-    def _minimax(self,depth: int, alpha: float, beta: float,depth_lim : int) -> float:
-
-        if(time.time()-self.start > self.time_budget):
+    def _minimax(self, depth: int, alpha: float, beta: float, depth_lim: int) -> float:
+        if time.time() - self.start > self.time_budget:
             raise TimeoutException()
-        
-        self.node_count+=1
 
         key = self._get_hash()
         if key in self.transposition_table:
-            t_depth,t_eval,t_flag = self.transposition_table[key]
-
+            t_depth, t_eval, t_flag = self.transposition_table[key]
             remaining_depth = depth_lim - depth
-
-            if(t_depth>= remaining_depth):
-                self.transpositions_used+=1
-                
+            if t_depth >= remaining_depth:
                 if t_flag == EXACT_FLAG:
                     return t_eval
                 elif t_flag == UPPER_FLAG:
-                    beta =  min(beta,t_eval)
+                    beta = min(beta, t_eval)
                 elif t_flag == LOWER_FLAG:
-                    alpha =  max(alpha,t_eval)
-                
-                if alpha>=beta:
+                    alpha = max(alpha, t_eval)
+                if alpha >= beta:
                     return t_eval
 
-        
-        
-        if(depth == depth_lim):
+        if depth == depth_lim:
             eval = self._evaluation()
-            if(len(self.transposition_table)< MAX_TRANSPOSITIONS):
-                self.transposition_table[key] = (0,eval,EXACT_FLAG)
-                self.transpositions_added+=1
-
+            if len(self.transposition_table) < MAX_TRANSPOSITIONS:
+                self.transposition_table[key] = (0, eval, EXACT_FLAG)
             return eval
 
-        elif(self._board.turn_color == self._color):
+        elif self._board.turn_color == self._color:
             highest = -Math.inf
             prev_alpha = alpha
-
             moves = self._legal_play_actions(self._color)
             if self.killers[depth] in moves:
                 moves.remove(self.killers[depth])
@@ -171,94 +130,79 @@ class Agent:
             for action in moves:
                 self._board.apply_action(action)
                 try:
-                    value = self._minimax(depth+1,alpha,beta,depth_lim)
+                    value = self._minimax(depth + 1, alpha, beta, depth_lim)
                 except TimeoutException:
                     self._board.undo_action()
                     raise
                 self._board.undo_action()
-                
-                if(value>highest):
+                if value > highest:
                     highest = value
                     self.killers[depth] = action
-                alpha = max(value,alpha)
-                if(beta <= alpha):
+                alpha = max(value, alpha)
+                if beta <= alpha:
                     break
 
-            flag = -1
-            if(highest<= prev_alpha):
+            flag = EXACT_FLAG
+            if highest <= prev_alpha:
                 flag = UPPER_FLAG
-            elif(highest>= beta):
+            elif highest >= beta:
                 flag = LOWER_FLAG
-            else:
-                flag = EXACT_FLAG
-            if(len(self.transposition_table)< MAX_TRANSPOSITIONS):
-                self.transposition_table[key] = (depth_lim-depth,highest,flag)
-                self.transpositions_added+=1
-
+            if len(self.transposition_table) < MAX_TRANSPOSITIONS:
+                self.transposition_table[key] = (depth_lim - depth, highest, flag)
             return highest
-        elif(self._board.turn_color == self._color.opponent):
+
+        elif self._board.turn_color == self._color.opponent:
             lowest = Math.inf
             prev_beta = beta
             moves = self._legal_play_actions(self._color.opponent)
             if self.killers[depth] in moves:
                 moves.remove(self.killers[depth])
                 moves.insert(0, self.killers[depth])
-        
-            for action in moves:
-                    self._board.apply_action(action)
-                    try:
-                        value = self._minimax(depth+1,alpha,beta,depth_lim)
-                    except TimeoutException:
-                        self._board.undo_action()
-                        raise
-                    self._board.undo_action()
-                    if(value<lowest):
-                        lowest = value
-                        self.killers[depth] = action
-                    beta = min(value,beta)
-                    if(beta <= alpha):
-                        break
-            
-            flag = -1
-            if(lowest >= prev_beta):
-                flag = LOWER_FLAG
-            elif(lowest<= alpha):
-                flag = UPPER_FLAG
-            else:
-                flag = EXACT_FLAG
-            if(len(self.transposition_table)< MAX_TRANSPOSITIONS):
-                self.transposition_table[key] = (depth_lim-depth,lowest,flag)
-                self.transpositions_added+=1
 
+            for action in moves:
+                self._board.apply_action(action)
+                try:
+                    value = self._minimax(depth + 1, alpha, beta, depth_lim)
+                except TimeoutException:
+                    self._board.undo_action()
+                    raise
+                self._board.undo_action()
+                if value < lowest:
+                    lowest = value
+                    self.killers[depth] = action
+                beta = min(value, beta)
+                if beta <= alpha:
+                    break
+
+            flag = EXACT_FLAG
+            if lowest >= prev_beta:
+                flag = LOWER_FLAG
+            elif lowest <= alpha:
+                flag = UPPER_FLAG
+            if len(self.transposition_table) < MAX_TRANSPOSITIONS:
+                self.transposition_table[key] = (depth_lim - depth, lowest, flag)
             return lowest
 
     def _evaluation(self) -> float:
-        
-        
-        if(self._board.game_over):
-            if(self._board.winner_color == self._color): return Math.inf
-            elif(self._board.winner_color == self._color.opponent): return -Math.inf
+        if self._board.game_over:
+            if self._board.winner_color == self._color:          return Math.inf
+            elif self._board.winner_color == self._color.opponent: return -Math.inf
             else: return 0
 
         eval = 0
+        ourTowers   = [(k, v) for k, v in self._board._state.items() if v.color == self._color]
+        enemyTowers = [(k, v) for k, v in self._board._state.items() if v.color == self._color.opponent]
 
-        ourTowers  = [(k,v) for k,v in self._board._state.items() if v.color == self._color]
-        enemyTowers = [(k,v) for k,v in self._board._state.items() if v.color == self._color.opponent]
-
-
-        if(self._color == PlayerColor.RED):
-            eval +=  10*(self._board.red_tokens - self._board.blue_tokens)
+        if self._color == PlayerColor.RED:
+            eval += 10 * (self._board.red_tokens - self._board.blue_tokens)
         else:
-            eval += -10*(self._board.red_tokens - self._board.blue_tokens)
+            eval += -10 * (self._board.red_tokens - self._board.blue_tokens)
 
         eval += self._attacking_power(ourTowers, enemyTowers)
-
-        eval += 2*self._number_being_threatned(ourTowers,enemyTowers)
-
-        eval += 0.5*self._proximity(ourTowers,enemyTowers)
-
+        eval += 2 * self._number_being_threatned(ourTowers, enemyTowers)
+        eval += 0.5 * self._proximity(ourTowers, enemyTowers)
         return eval
-    
+
     def _proximity(self, ourTowers, enemyTowers):
         bonus = 0
         for oppCoord, oppVal in enemyTowers:
@@ -268,9 +212,8 @@ class Agent:
                 if myVal.height >= oppVal.height
             ]
             if killable_dists:
-                bonus -= min(killable_dists) 
+                bonus -= min(killable_dists)
         return bonus
-        
 
     def _attacking_power(self, ourTowers, enemyTowers):
         ourAttackingPower = 0
@@ -282,40 +225,34 @@ class Agent:
         enemyAttackingPower = 0
         for oppCoord, oppVal in enemyTowers:
             for myCoord, myVal in ourTowers:
-                if oppVal.height >= myVal.height: 
+                if oppVal.height >= myVal.height:
                     enemyAttackingPower += 1
 
         return ourAttackingPower - enemyAttackingPower
-        
-        
-    def _number_being_threatned(self,ourTowers,enemyTowers):
-        
+
+    def _number_being_threatned(self, ourTowers, enemyTowers):
         numEnemyThreats = 0
         for i in enemyTowers:
             for j in ourTowers:
-                dist = self.manhattan_distance(i[0],j[0])
+                dist = self.manhattan_distance(i[0], j[0])
                 if i[1].height >= j[1].height and dist == 1:
-                    numEnemyThreats+=j[1].height
-                elif(i[0].r == j[0].r):
-                    if(i[0].c<j[0].c):
-                        if(i[0].c+i[1].height>=BOARD_N):
-                            numEnemyThreats+=j[1].height
-                    elif(i[0].c>j[0].c):
-                        if(i[0].c-i[1].height<=0):
-                            numEnemyThreats+=j[1].height
-                elif(i[0].c == j[0].c):
-                    if(i[0].r<j[0].r):
-                        if(i[0].r+i[1].height>=BOARD_N):
-                            numEnemyThreats+=j[1].height
-                    elif(i[0].r>j[0].r):
-                        if(i[0].r-i[1].height<=0):
-                            numEnemyThreats+=j[1].height
-        
-        
+                    numEnemyThreats += j[1].height
+                elif i[0].r == j[0].r:
+                    if i[0].c < j[0].c:
+                        if i[0].c + i[1].height >= BOARD_N:
+                            numEnemyThreats += j[1].height
+                    elif i[0].c > j[0].c:
+                        if i[0].c - i[1].height <= 0:
+                            numEnemyThreats += j[1].height
+                elif i[0].c == j[0].c:
+                    if i[0].r < j[0].r:
+                        if i[0].r + i[1].height >= BOARD_N:
+                            numEnemyThreats += j[1].height
+                    elif i[0].r > j[0].r:
+                        if i[0].r - i[1].height <= 0:
+                            numEnemyThreats += j[1].height
         return -numEnemyThreats
-        
 
-        
     def placement_evaluation(self, coord) -> float:
         state = self._board._state
         color = self._color
@@ -345,16 +282,13 @@ class Agent:
 
         if team_count == 1:
             for tower_coord, cell in state.items():
-                if cell.color == color:
-                    if self.manhattan_distance(tower_coord, coord) == 1:
-                        return center_score + 100
+                if cell.color == color and self.manhattan_distance(tower_coord, coord) == 1:
+                    return center_score + 100
 
         return 2 * center_score + spread_score + 1.5 * cascade_score
 
     def manhattan_distance(self, a: Coord, b: Coord):
         return abs(a.r - b.r) + abs(a.c - b.c)
-
-
 
     def update(self, color: PlayerColor, action: Action, **referee: dict):
         self._board.apply_action(action)
@@ -366,10 +300,8 @@ class Agent:
                 coord = Coord(r, c)
                 if not self._board[coord].is_empty:
                     continue
-
                 if self._board._placement_count > 0 and self._adj_opponent(coord):
                     continue
-
                 actions.append(PlaceAction(coord))
         return actions
 
@@ -382,12 +314,10 @@ class Agent:
             except ValueError:
                 pass
         return False
-    
 
-    def _legal_play_actions(self, color : PlayerColor) -> list[Action]:
+    def _legal_play_actions(self, color: PlayerColor) -> list[Action]:
         state = self._board._state
         opp = color.opponent
-
         eat_actions = []
         cascade_actions = []
         move_actions = []
@@ -403,32 +333,26 @@ class Agent:
                     elif self._board[des].color == color:
                         move_actions.append(MoveAction(coord, d))
                     elif self._board[des].color == opp:
-                        if (cell.height >= self._board[des].height):
+                        if cell.height >= self._board[des].height:
                             eat_actions.append(EatAction(coord, d))
                 except ValueError:
                     pass
-
             if cell.height >= 2:
                 for d in CARDINAL_DIRECTIONS:
                     cascade_actions.append(CascadeAction(coord, d))
-        
+
         return eat_actions + cascade_actions + move_actions
 
-
     def _init_zobrist_hash(self):
-
         for r in range(BOARD_N):
             for c in range(BOARD_N):
-                for color in [PlayerColor.RED,PlayerColor.BLUE]:
-                    for height in range(1,13):
-                        self.zobrist_table[(r,c,color,height)] = random.getrandbits(64)
-
-        return
+                for color in [PlayerColor.RED, PlayerColor.BLUE]:
+                    for height in range(1, 13):
+                        self.zobrist_table[(r, c, color, height)] = random.getrandbits(64)
 
     def _get_hash(self):
-        hash = 0
-        for coord,cell_state in self._board._state.items():
+        h = 0
+        for coord, cell_state in self._board._state.items():
             if not self._board[coord].is_empty:
-                hash ^= self.zobrist_table[(coord.r,coord.c,cell_state.color,cell_state.height)]
-
-        return hash
+                h ^= self.zobrist_table[(coord.r, coord.c, cell_state.color, cell_state.height)]
+        return h

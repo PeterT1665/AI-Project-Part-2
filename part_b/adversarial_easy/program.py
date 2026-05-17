@@ -70,13 +70,6 @@ class Agent:
         else:
             return -(self._board.red_tokens - self._board.blue_tokens)
         
-    def _evaluation1(self) -> float:
-        if(self._color == PlayerColor.RED):
-            return self._board.red_tokens - self._board.blue_tokens
-        else:
-            return -(self._board.red_tokens - self._board.blue_tokens)
-
-
     def update(self, color: PlayerColor, action: Action, **referee: dict):
         self._board.apply_action(action)
 

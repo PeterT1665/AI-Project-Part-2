@@ -40,7 +40,6 @@ def _mhdist(a: Coord, b: Coord) -> int:
 
 
 def _cascade_reach(coord: Coord, height: int) -> int:
-    # number of cells reachable by cascade in 4 directions, capped at h6
     h = min(height, 6)
     r, c = coord.r, coord.c
     return min(h, r) + min(h, 7 - r) + min(h, c) + min(h, 7 - c)
@@ -90,7 +89,6 @@ class Agent:
         if self._board.phase == GamePhase.PLACEMENT:
             return self._best_placement()
 
-        # spread time budget across remaining turns; spend more in endgame
         time_rem = referee.get('time_remaining', 60.0)
         self._turns_played += 1
         turns_left = max(10, 120 - self._turns_played)
@@ -101,7 +99,6 @@ class Agent:
         best       = None
         prev_score = 0
 
-        # iterative deepening with aspiration windows
         for depth in range(1, MAX_DEPTH + 1):
             if self._timed_out():
                 break
@@ -111,7 +108,6 @@ class Agent:
             else:
                 delta = 30
                 move, score = self._root(depth, prev_score - delta, prev_score + delta)
-                # re-search with full window if result fell outside aspiration window
                 if (abs(score) < math.inf and
                         (score <= prev_score - delta or score >= prev_score + delta)):
                     move, score = self._root(depth, -math.inf, math.inf)
@@ -238,7 +234,6 @@ class Agent:
         for move_idx, action in enumerate(moves):
             self._board.apply_action(action)
 
-            # late move reduction — quiet late moves searched at shallower depth
             reduce = (
                 depth >= 3 and
                 move_idx >= 4 and
@@ -279,7 +274,6 @@ class Agent:
         return best
 
     def _quiescence(self, alpha: float, beta: float, qdepth: int, is_max: bool) -> float:
-        # evaluate captures only to avoid horizon effect
         stand_pat = self._evaluate()
 
         if qdepth == 0:
@@ -322,11 +316,8 @@ class Agent:
         my_h  = sum(v.height for v in my_towers.values())
         opp_h = sum(v.height for v in opp_towers.values())
 
-        # token count is the win condition so it gets the highest weight
         token_diff = (my_h - opp_h) * 2.0
 
-        # penalise towers above h6 — merging past 6 just concentrates tokens
-        # without gaining new reach (cascade can already hit any height)
         height_penalty = 0.0
         for v in my_towers.values():
             if v.height > 6:
@@ -339,14 +330,10 @@ class Agent:
         opp_ctrl = sum(_cascade_reach(tc, tv.height) for tc, tv in opp_towers.items())
         control_diff = (my_ctrl - opp_ctrl) * 0.3
 
-        # edge pressure — we want our towers central and opponent towers on the edge
-        # min(r, 7-r, c, 7-c) is 0 on the edge and up to 3 at the centre
         my_edge_val  = sum(min(mc.r, 7 - mc.r, mc.c, 7 - mc.c) for mc in my_towers) * 0.2
         opp_edge_val = sum(min(tc.r, 7 - tc.r, tc.c, 7 - tc.c) for tc in opp_towers) * 0.4
         edge_pressure = my_edge_val - opp_edge_val
 
-        # threat quality — for each enemy find our closest eligible attacker
-        # cap at min(attacker, target) so there is no incentive to over-merge
         my_threat = sum(
             max((min(mv.height, tv.height) / (_mhdist(mc, tc) + 1)
                  for mc, mv in my_towers.items() if mv.height >= tv.height),
@@ -360,8 +347,6 @@ class Agent:
             for mc, mv in my_towers.items()
         )
 
-        # pairing bonus — count distinct friendly towers each hunting a different enemy
-        # two separate hunters > one merged hunter
         assigned = {}
         for tc, tv in opp_towers.items():
             best_q, best_mc = 0.0, None
@@ -374,8 +359,6 @@ class Agent:
                 assigned[tc] = best_mc
         pairing = len(set(assigned.values())) * 1.5
 
-        # reward enemies on our cascade lines; scale up when they're near the edge
-        # in our cascade direction — less room to escape = higher threat
         cascade_line_bonus = 0.0
         for mc, mv in my_towers.items():
             h = min(mv.height, 6)
@@ -401,18 +384,16 @@ class Agent:
                     if 1 <= d <= h:
                         cascade_line_bonus -= 0.5 / (d + 1)
 
-        # multi-tower coordination — bonus when 2+ friendly towers threaten the same enemy;
-        # double-teaming is more reliable than one merged tower
         coord_bonus = 0.0
         for tc, tv in opp_towers.items():
             attackers = 0
             for mc, mv in my_towers.items():
                 h = min(mv.height, 6)
                 if mv.height >= tv.height and _mhdist(mc, tc) == 1:
-                    attackers += 1  # direct eat
+                    attackers += 1
                 elif h >= 2 and (mc.r == tc.r or mc.c == tc.c):
                     if 1 <= _mhdist(mc, tc) <= h:
-                        attackers += 1  # cascade through
+                        attackers += 1
             if attackers >= 2:
                 coord_bonus += min(attackers - 1, 2) * 0.8
 
@@ -427,7 +408,6 @@ class Agent:
                 + random.uniform(-0.05, 0.05))
 
     def _ordered_actions(self, color: PlayerColor, depth: int, tt_move) -> list:
-        # TT move first, then eats, killers, cascades, moves (history-sorted within group)
         state = self._board._state
         opp   = color.opponent
         eats, cascades, moves = [], [], []

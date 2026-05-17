@@ -79,7 +79,6 @@ class Agent:
         if self._board.phase == GamePhase.PLACEMENT:
             return self._best_placement()
 
-        # Spread remaining time evenly across remaining turns
         time_rem = referee.get('time_remaining', 60.0)
         self._turns_played += 1
         turns_left = max(20, 150 - self._turns_played)
@@ -90,7 +89,6 @@ class Agent:
         best = None
         prev_score = 0
 
-        # Iterative deepening with aspiration windows
         for depth in range(1, MAX_DEPTH + 1):
             if self._timed_out():
                 break
@@ -100,7 +98,6 @@ class Agent:
             else:
                 delta = 30
                 move, score = self._root(depth, prev_score - delta, prev_score + delta)
-                # Re-search with full window if result fell outside aspiration window
                 if (abs(score) < math.inf and
                         (score <= prev_score - delta or score >= prev_score + delta)):
                     move, score = self._root(depth, -math.inf, math.inf)
@@ -221,7 +218,6 @@ class Agent:
         for move_idx, action in enumerate(moves):
             self._board.apply_action(action)
 
-            # Late move reductions: search quiet late moves at shallower depth
             reduce = (
                 depth >= 3 and
                 move_idx >= 4 and
@@ -230,7 +226,6 @@ class Agent:
             )
             val = self._minimax(depth - 1 - (1 if reduce else 0), alpha, beta, not is_max)
 
-            # Re-search at full depth if the reduced result looks promising
             if reduce:
                 if (is_max and val > alpha) or (not is_max and val < beta):
                     val = self._minimax(depth - 1, alpha, beta, not is_max)
@@ -306,13 +301,8 @@ class Agent:
         my_h  = sum(v.height for v in my_towers.values())
         opp_h = sum(v.height for v in opp_towers.values())
 
-        # Token count — endgame win condition, highest weight
         token_diff = (my_h - opp_h) * 2.0
 
-        # Threat quality: for each enemy find our best eligible attacker scored as
-        # height/(dist+1) — tall towers close to weak enemies score highest.
-        # This gives a smooth gradient for distance AND height in one term,
-        # so a merge that creates R6 close to an enemy beats scattered H1 debris.
         my_threat = sum(
             max((min(mv.height, tv.height) / (_mhdist(mc, tc) + 1)
                  for mc, mv in my_towers.items() if mv.height >= tv.height),
@@ -326,8 +316,6 @@ class Agent:
             for mc, mv in my_towers.items()
         )
 
-        # Multi-attack: count distinct my towers (h>=3) that are the highest-quality
-        # threat to DIFFERENT enemies — two towers each owning a separate enemy > one tower
         assigned = {}
         for tc, tv in opp_towers.items():
             best_q, best_mc = 0.0, None
@@ -340,7 +328,6 @@ class Agent:
                 assigned[tc] = best_mc
         multi_attack = len(set(assigned.values())) * 2.0
 
-        # Directional cascade pressure: aligned + pushing enemy toward nearest edge
         cascade_pressure = 0.0
         for tc, tv in opp_towers.items():
             for mc, mv in my_towers.items():
@@ -353,7 +340,6 @@ class Agent:
                     edge_exp = (7 - tc.r) if mc.r < tc.r else tc.r
                     cascade_pressure += 1.0 / ((abs(mc.r - tc.r) + 1) * (edge_exp + 1))
 
-        # Mobility balance: (my escape routes - opp escape routes)
         my_mob = opp_mob = 0
         for mc, mv in my_towers.items():
             for d in CARDINAL_DIRECTIONS:
@@ -380,8 +366,6 @@ class Agent:
                 + random.uniform(-0.1, 0.1))
 
     def _attack_cost(self, attackers: dict, targets: dict) -> float:
-        # Greedy chain: after eating a target, the attacker moves to that cell
-        # so it can chain into the next target from a closer position
         attackers = dict(attackers)   # shallow copy — we mutate positions
         total = 0
         for tc, tv in targets.items():
@@ -404,7 +388,6 @@ class Agent:
         return total
 
     def _ordered_actions(self, color: PlayerColor, depth: int, tt_move) -> list:
-        # Order: TT move -> eats -> killers -> cascades (by history) -> moves (by history)
         state = self._board._state
         opp = color.opponent
         eats, cascades, moves = [], [], []
@@ -451,7 +434,6 @@ class Agent:
         return ordered
 
     def _captures(self, color: PlayerColor) -> list:
-        # Eat + cascade-through-enemy actions for quiescence search
         state = self._board._state
         opp = color.opponent
         result = []
