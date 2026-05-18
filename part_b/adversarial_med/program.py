@@ -10,35 +10,47 @@ from referee.game.coord import CARDINAL_DIRECTIONS
 from referee.game.constants import BOARD_N
 import time
 
+# Memory cap for the transposition table
 MAX_TRANSPOSITIONS = 1_000_000
-MAX_TURNS = 300
-PLACEMENT_TURNS = 8
+
+# TT flags: 
+# EXACT = true value, 
+# UPPER = we failed low (upper bound)
+# LOWER = we failed high (lower bound)
+EXACT_FLAG = 0
+UPPER_FLAG = 1
+LOWER_FLAG = 2
 
 EXACT_FLAG = 0
 UPPER_FLAG = 1
 LOWER_FLAG = 2
 
+# For time management
+MAX_TURNS = 300
+PLACEMENT_TURNS = 8
 
 class TimeoutException(Exception):
     pass
-
 
 class Agent:
 
     def __init__(self, color: PlayerColor, **referee: dict):
         self._color = color
         self._board = Board()
-        self.zobrist_table = {}
+        self.zobrist_table = {}         # Random bitstrings for each (cell, colour, height) combination
         self._init_zobrist_hash()
-        self.transposition_table = {}
+        self.transposition_table = {}   # maps board hash -> (depth, score, flag)
         self.start = 0
         self.time_budget = 0
-        self.killers = [None] * 50
+        self.killers = [None] * 50      # best move that caused a cutoff at each depth
+
 
     def action(self, **referee: dict) -> Action:
+        # Time management for not reaching time limit
         self.start = time.time()
         self.time_budget = self._budget_time(referee)
 
+        # Smart placement using placement evaluation
         if self._board.phase == GamePhase.PLACEMENT:
             maxEval = -Math.inf
             bestPlace = None
@@ -51,7 +63,11 @@ class Agent:
 
         legal_actions = self._legal_play_actions(self._color)
         best_move = None
+
+        # Iterative deepening
+        # Search depth 1 -> 2 -> 3 until time runs out
         for depth_limit in range(1, 20):
+            # Reset killers for each new depth
             self.killers = [None] * 50
             if time.time() - self.start > self.time_budget:
                 break
@@ -81,6 +97,7 @@ class Agent:
                     iterations_bestMove = action
                     alpha = eval
 
+            # Move ordering: put best move from this iteration first -> for next depth searches
             if not budget_depleted and iterations_bestMove is not None:
                 best_move = iterations_bestMove
                 legal_actions.remove(best_move)
@@ -88,17 +105,28 @@ class Agent:
 
         return best_move
 
+    # Allocate more time per turn in later in the game when decisions are more critical leading to win
     def _budget_time(self, referee: dict):
         time_remaining = referee["time_remaining"]
+
+        # Turns left for each player
         turns_left = max(1, (MAX_TURNS - PLACEMENT_TURNS - self._board.turn_count) / 2)
+
+        # 0 = early in the game
+        # 1 = later in the game -> fewer pieces remain
         end_game = 1 - (min(self._board.red_tokens, self._board.blue_tokens) / 12)
+
+        # Spend up to 3x more time per turn in endgame -> deeper search for win
         scale = 1 + 2 * end_game
         return (time_remaining / turns_left) * scale
 
     def _minimax(self, depth: int, alpha: float, beta: float, depth_lim: int) -> float:
+        # Out of time
         if time.time() - self.start > self.time_budget:
             raise TimeoutException()
 
+        # Check TT
+        # If we've seen this position before at sufficient depth -> reuse the result
         key = self._get_hash()
         if key in self.transposition_table:
             t_depth, t_eval, t_flag = self.transposition_table[key]
@@ -113,16 +141,20 @@ class Agent:
                 if alpha >= beta:
                     return t_eval
 
+        # Base case: reached depth limit, return right away
         if depth == depth_lim:
             eval = self._evaluation()
             if len(self.transposition_table) < MAX_TRANSPOSITIONS:
                 self.transposition_table[key] = (0, eval, EXACT_FLAG)
             return eval
 
+        # Max (us): pick highest value
         elif self._board.turn_color == self._color:
             highest = -Math.inf
             prev_alpha = alpha
             moves = self._legal_play_actions(self._color)
+
+            # Killer heuristic: try the move that caused a cutoff at this depth first
             if self.killers[depth] in moves:
                 moves.remove(self.killers[depth])
                 moves.insert(0, self.killers[depth])
@@ -139,6 +171,7 @@ class Agent:
                     highest = value
                     self.killers[depth] = action
                 alpha = max(value, alpha)
+                # Pruning - no need for further search
                 if beta <= alpha:
                     break
 
@@ -147,14 +180,19 @@ class Agent:
                 flag = UPPER_FLAG
             elif highest >= beta:
                 flag = LOWER_FLAG
+            
+            # Store result in TT for future lookups
             if len(self.transposition_table) < MAX_TRANSPOSITIONS:
                 self.transposition_table[key] = (depth_lim - depth, highest, flag)
             return highest
 
+        # Min (opp): pick lowest value
         elif self._board.turn_color == self._color.opponent:
             lowest = Math.inf
             prev_beta = beta
             moves = self._legal_play_actions(self._color.opponent)
+
+            # Killer heuristic: try the move that caused a cutoff at this depth first
             if self.killers[depth] in moves:
                 moves.remove(self.killers[depth])
                 moves.insert(0, self.killers[depth])
@@ -171,6 +209,7 @@ class Agent:
                     lowest = value
                     self.killers[depth] = action
                 beta = min(value, beta)
+                # Pruning - no need for further search
                 if beta <= alpha:
                     break
 
@@ -179,33 +218,44 @@ class Agent:
                 flag = LOWER_FLAG
             elif lowest <= alpha:
                 flag = UPPER_FLAG
+
+            # Store result in TT for future lookups
             if len(self.transposition_table) < MAX_TRANSPOSITIONS:
                 self.transposition_table[key] = (depth_lim - depth, lowest, flag)
             return lowest
 
+    # Evaluation for play phase
     def _evaluation(self) -> float:
+        # Game over check
         if self._board.game_over:
             if self._board.winner_color == self._color:          return Math.inf
             elif self._board.winner_color == self._color.opponent: return -Math.inf
             else: return 0
 
         eval = 0
+
+        # Get 2 list of our towers and opp's towers
         ourTowers   = [(k, v) for k, v in self._board._state.items() if v.color == self._color]
         enemyTowers = [(k, v) for k, v in self._board._state.items() if v.color == self._color.opponent]
 
+        # Adding token difference
         if self._color == PlayerColor.RED:
             eval += 10 * (self._board.red_tokens - self._board.blue_tokens)
         else:
             eval += -10 * (self._board.red_tokens - self._board.blue_tokens)
 
+        # Adding evaluation terms
         eval += self._attacking_power(ourTowers, enemyTowers)
         eval += 2 * self._number_being_threatned(ourTowers, enemyTowers)
         eval += 0.5 * self._proximity(ourTowers, enemyTowers)
         return eval
 
+    # Reward being close to enemy towers we can kill
     def _proximity(self, ourTowers, enemyTowers):
         bonus = 0
+        # get the closest distance to kill enemy tower
         for oppCoord, oppVal in enemyTowers:
+            # distances to enemy tower from all our towers (tall enough to eat)
             killable_dists = [
                 self.manhattan_distance(myCoord, oppCoord)
                 for myCoord, myVal in ourTowers
@@ -215,14 +265,19 @@ class Agent:
                 bonus -= min(killable_dists)
         return bonus
 
+    # Count how many enemy towers we can eat vs how many can eat us
     def _attacking_power(self, ourTowers, enemyTowers):
         ourAttackingPower = 0
+        
+        # Our tower (tall enough to eat at least 1 enemy tower)
         for myCoord, myVal in ourTowers:
             for oppCoord, oppVal in enemyTowers:
                 if myVal.height >= oppVal.height:
                     ourAttackingPower += 1
 
         enemyAttackingPower = 0
+
+        # Enemy tower (tall enough to eat at least 1 of ours)
         for oppCoord, oppVal in enemyTowers:
             for myCoord, myVal in ourTowers:
                 if oppVal.height >= myVal.height:
@@ -230,21 +285,30 @@ class Agent:
 
         return ourAttackingPower - enemyAttackingPower
 
+    # Penalise enemy towers that can directly eat or cascade into our towers
     def _number_being_threatned(self, ourTowers, enemyTowers):
         numEnemyThreats = 0
         for i in enemyTowers:
             for j in ourTowers:
                 dist = self.manhattan_distance(i[0], j[0])
+
+                # Direct eat threat
                 if i[1].height >= j[1].height and dist == 1:
                     numEnemyThreats += j[1].height
+
+                # Cascade threat (same row)
                 elif i[0].r == j[0].r:
+                    # Check if enemy can reach the board edge
                     if i[0].c < j[0].c:
                         if i[0].c + i[1].height >= BOARD_N:
                             numEnemyThreats += j[1].height
                     elif i[0].c > j[0].c:
                         if i[0].c - i[1].height <= 0:
                             numEnemyThreats += j[1].height
+
+                # Cascade threat (same col)
                 elif i[0].c == j[0].c:
+                    # Check if enemy can reach the board edge
                     if i[0].r < j[0].r:
                         if i[0].r + i[1].height >= BOARD_N:
                             numEnemyThreats += j[1].height
@@ -253,13 +317,16 @@ class Agent:
                             numEnemyThreats += j[1].height
         return -numEnemyThreats
 
+    # Score a candidate placement cell based on centre, spread from teammates, and cascade reach
     def placement_evaluation(self, coord) -> float:
         state = self._board._state
         color = self._color
         team_count = sum(1 for cell in state.values() if cell.color == color)
 
+        # Center score
         center_score = -(abs(coord.r - 3.5) + abs(coord.c - 3.5))
 
+        # Min distance to closest teammate (0 if first piece)
         spread_score = Math.inf
         for team_coord, cell in state.items():
             if cell.color == color:
@@ -267,6 +334,7 @@ class Agent:
         if spread_score == Math.inf:
             spread_score = 0
 
+        # count cells reachable in each direction within 3 steps (edges score lower)
         cascade_score = 0
         for d in CARDINAL_DIRECTIONS:
             if d == Direction.Right:
@@ -280,6 +348,7 @@ class Agent:
             if count <= 3:
                 cascade_score += count
 
+        # 2nd piece: prioritise placing adjacent to 1st to enable immediate merge
         if team_count == 1:
             for tower_coord, cell in state.items():
                 if cell.color == color and self.manhattan_distance(tower_coord, coord) == 1:
@@ -287,12 +356,14 @@ class Agent:
 
         return 2 * center_score + spread_score + 1.5 * cascade_score
 
+    # Distance between 2 coords
     def manhattan_distance(self, a: Coord, b: Coord):
         return abs(a.r - b.r) + abs(a.c - b.c)
 
     def update(self, color: PlayerColor, action: Action, **referee: dict):
         self._board.apply_action(action)
 
+    # Finding all the legal placement
     def _legal_placements(self) -> list[PlaceAction]:
         actions = []
         for r in range(BOARD_N):
@@ -300,11 +371,13 @@ class Agent:
                 coord = Coord(r, c)
                 if not self._board[coord].is_empty:
                     continue
+                # First placement has no restriction since the board is empty
                 if self._board._placement_count > 0 and self._adj_opponent(coord):
                     continue
                 actions.append(PlaceAction(coord))
         return actions
 
+    # Check if any opponent piece is adjacent to the current coord
     def _adj_opponent(self, coord: Coord) -> bool:
         opp = self._color.opponent
         for d in CARDINAL_DIRECTIONS:
@@ -315,6 +388,7 @@ class Agent:
                 pass
         return False
 
+    # Find all the legal play action - Eat/Move/Cascade
     def _legal_play_actions(self, color: PlayerColor) -> list[Action]:
         state = self._board._state
         opp = color.opponent
@@ -325,31 +399,41 @@ class Agent:
         for coord, cell in state.items():
             if cell.color != color:
                 continue
+
+            # Move type actions
             for d in CARDINAL_DIRECTIONS:
                 try:
                     des = coord + d
+                    # Normal move to empty spot
                     if self._board[des].is_empty:
                         move_actions.append(MoveAction(coord, d))
+                    # Move to teammate -> Merge
                     elif self._board[des].color == color:
                         move_actions.append(MoveAction(coord, d))
+                    # Move to opponent -> Eat
                     elif self._board[des].color == opp:
                         if cell.height >= self._board[des].height:
                             eat_actions.append(EatAction(coord, d))
+                # Off the board -> pass
                 except ValueError:
                     pass
+
+            # Cascade actions
             if cell.height >= 2:
                 for d in CARDINAL_DIRECTIONS:
                     cascade_actions.append(CascadeAction(coord, d))
 
         return eat_actions + cascade_actions + move_actions
 
+    # Assign a unique random number to every (cell, colour, height) combination
     def _init_zobrist_hash(self):
         for r in range(BOARD_N):
             for c in range(BOARD_N):
                 for color in [PlayerColor.RED, PlayerColor.BLUE]:
                     for height in range(1, 13):
                         self.zobrist_table[(r, c, color, height)] = random.getrandbits(64)
-
+                        
+    # Hash the current board state by XORing all pieces' Zobrist keys together
     def _get_hash(self):
         h = 0
         for coord, cell_state in self._board._state.items():
