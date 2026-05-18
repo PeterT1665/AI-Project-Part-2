@@ -94,6 +94,7 @@ class Agent:
         self._pos_hist   = []                                            # recent board hashes for repetition detection
         self._start_t    = 0.0
         self._time_limit = TIME_LIMIT_MAX
+        self._turns_played = 0
 
     def action(self, **referee: dict) -> Action:
         # Smart placement using placement evaluation
